@@ -1,0 +1,224 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Gamunu Balagalla
+
+import Foundation
+
+public struct RouterResponse {
+    public enum Body {
+        case none
+        case data(Data)
+        case file(URL, contentType: String)
+        /// The page is not ready yet. The HTTP layer waits on this and then sends the file.
+        case pending(PageWaiter)
+    }
+
+    public var status: Int
+    public var headers: [String: String]
+    public var body: Body
+
+    public init(status: Int, headers: [String: String] = [:], body: Body = .none) {
+        self.status = status
+        self.headers = headers
+        self.body = body
+    }
+}
+
+/// eSCL for one scanner: method, path and body in, response out. Knows nothing about sockets.
+public final class ESCLRouter: @unchecked Sendable {
+    /// How long a finished job stays in the status list (the spec leaves this open).
+    public static let finishedJobLifetime: TimeInterval = 300
+    /// The scanner state is read at most this often while no job runs.
+    static let stateCacheSeconds: TimeInterval = 3
+
+    private let device: ScanDevice
+    private let name: String
+    private let uuid: UUID
+    private let serial: String
+    private let tone: ToneCalibration
+    private let workDir: URL
+    private let onActivity: @Sendable (Bool) -> Void
+    private let blocked: @Sendable () -> Bool
+
+    private let lock = NSLock()
+    private let idle = NSCondition()
+    private let jobs = JobTable()
+    private var running: ScanJobRecord?
+    private var cachedState: (value: String, at: Date)?
+    private let queue = DispatchQueue(label: "escl.scan", qos: .userInitiated)
+
+    public init(device: ScanDevice, name: String, uuid: UUID, serial: String, tone: ToneCalibration, workDir: URL,
+                onActivity: @escaping @Sendable (Bool) -> Void, blocked: @escaping @Sendable () -> Bool = { false }) {
+        self.device = device
+        self.name = name
+        self.uuid = uuid
+        self.serial = serial
+        self.tone = tone
+        self.workDir = workDir
+        self.onActivity = onActivity
+        self.blocked = blocked
+        try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+    }
+
+    // MARK: routes
+
+    public func handle(method: String, path rawPath: String, body: Data) -> RouterResponse {
+        let path = rawPath.split(separator: "?", maxSplits: 1).first.map(String.init) ?? rawPath
+        expireFinishedJobs(olderThan: Self.finishedJobLifetime)
+        let parts = path.split(separator: "/").map(String.init)
+        guard parts.first == "eSCL" else { return notFound() }
+        switch (method, parts.count) {
+        case ("GET", 2) where parts[1] == "ScannerCapabilities":
+            return xml(ESCLCaps.xml(caps: device.caps, name: name, uuid: uuid, serial: serial))
+        case ("GET", 2) where parts[1] == "ScannerStatus":
+            return xml(status())
+        case ("POST", 2) where parts[1] == "ScanJobs":
+            return createJob(body)
+        case ("GET", 4) where parts[1] == "ScanJobs" && parts[3] == "NextDocument":
+            return nextDocument(Int(parts[2]))
+        case ("DELETE", 3) where parts[1] == "ScanJobs":
+            return deleteJob(Int(parts[2]))
+        default:
+            return notFound()
+        }
+    }
+
+    /// Cancels the running job and removes the page files.
+    public func shutdown() {
+        lock.lock()
+        running?.cancelled = true
+        lock.unlock()
+        waitUntilIdle()
+        lock.lock()
+        let files = jobs.allPageFiles()
+        lock.unlock()
+        for f in files { try? FileManager.default.removeItem(at: f) }
+    }
+
+    /// True while a scan is running or being rendered.
+    public var isBusy: Bool { lock.lock(); defer { lock.unlock() }; return running != nil }
+
+    func waitUntilIdle() {
+        idle.lock(); defer { idle.unlock() }
+        while isBusy { idle.wait(until: Date().addingTimeInterval(0.05)) }
+    }
+
+    func expireFinishedJobs(olderThan age: TimeInterval) {
+        lock.lock()
+        let files = jobs.expire(olderThan: age, now: Date())
+        lock.unlock()
+        for f in files { try? FileManager.default.removeItem(at: f) }
+    }
+
+    // MARK: handlers
+
+    private func notFound() -> RouterResponse { RouterResponse(status: 404) }
+
+    private func xml(_ s: String) -> RouterResponse {
+        RouterResponse(status: 200, headers: ["Content-Type": "text/xml"], body: .data(Data(s.utf8)))
+    }
+
+    private func status() -> String {
+        lock.lock()
+        let busy = running != nil
+        let list = jobs.infos(now: Date())
+        let cached = cachedState
+        lock.unlock()
+        if busy { return ESCLStatus.xml(state: "Processing", jobs: list) }
+
+        var state: String
+        if let cached, Date().timeIntervalSince(cached.at) < Self.stateCacheSeconds {
+            state = cached.value
+        } else {
+            do { state = try device.scannerState() == "Idle" ? "Idle" : "Processing" } catch { state = "Stopped" }
+            lock.lock(); cachedState = (state, Date()); lock.unlock()
+        }
+        return ESCLStatus.xml(state: state, jobs: list)
+    }
+
+    private func createJob(_ body: Data) -> RouterResponse {
+        guard let parsed = ESCLScanSettings.parse(body), let settings = try? parsed.validated(against: device.caps) else {
+            return RouterResponse(status: 400)
+        }
+        lock.lock()
+        if running != nil || blocked() { lock.unlock(); return RouterResponse(status: 503, headers: ["Retry-After": "5"]) }
+        // Reserve the scanner before leaving the lock, so a second POST sees it taken.
+        let plan = ScanPlanner.plan(settings, caps: device.caps, tone: tone)
+        let job = jobs.create(plan: plan, resolution: settings.resolution)
+        running = job
+        cachedState = nil
+        lock.unlock()
+
+        let ready = (try? device.scannerState()) == "Idle"
+        if !ready {
+            lock.lock()
+            job.state = .aborted; job.finished = Date(); running = nil
+            lock.unlock()
+            job.waiter.resolve(.failed)
+            idle.lock(); idle.broadcast(); idle.unlock()
+            return RouterResponse(status: 503, headers: ["Retry-After": "5"])
+        }
+
+        onActivity(true)
+        queue.async { [self] in run(job) }
+        return RouterResponse(status: 201, headers: ["Location": "/eSCL/ScanJobs/\(job.id)"])
+    }
+
+    private func run(_ job: ScanJobRecord) {
+        let raw = workDir.appendingPathComponent("job-\(job.id).page")
+        let out = workDir.appendingPathComponent("job-\(job.id).out")
+        var result: PageResult = .failed
+        var state = ESCLJobInfo.State.aborted
+        var completed = 0
+        var keep: URL?
+        do {
+            let outcome = try device.scan(job.plan.request, to: raw, isCancelled: { job.cancelled })
+            switch outcome {
+            case .page:
+                if job.cancelled {
+                    state = .canceled; result = .noMorePages
+                } else {
+                    try ImagePipeline.render(page: raw, plan: job.plan, resolution: job.resolution, to: out)
+                    keep = out
+                    state = .completed; completed = 1
+                    result = .file(out, contentType: job.plan.output.rawValue)
+                }
+            case .noDocument: state = .completed; result = .noMorePages
+            case .canceledByClient: state = .canceled; result = .noMorePages
+            case .canceledByDevice: state = .aborted; result = .failed
+            }
+        } catch {
+            state = job.cancelled ? .canceled : .aborted
+            result = job.cancelled ? .noMorePages : .failed
+        }
+        try? FileManager.default.removeItem(at: raw)
+
+        lock.lock()
+        job.state = state
+        job.imagesCompleted = completed
+        job.pageFile = keep
+        job.finished = Date()
+        running = nil
+        cachedState = nil
+        lock.unlock()
+        job.waiter.resolve(result)
+        onActivity(false)
+        idle.lock(); idle.broadcast(); idle.unlock()
+    }
+
+    private func nextDocument(_ id: Int?) -> RouterResponse {
+        lock.lock(); defer { lock.unlock() }
+        guard let id, let job = jobs.job(id), !job.nextDocumentServed else { return notFound() }
+        job.nextDocumentServed = true
+        return RouterResponse(status: 200, body: .pending(job.waiter))
+    }
+
+    private func deleteJob(_ id: Int?) -> RouterResponse {
+        lock.lock(); defer { lock.unlock() }
+        guard let id, let job = jobs.job(id) else { return notFound() }
+        if job.state == .processing {
+            job.cancelled = true
+            job.state = .canceled
+        }
+        return RouterResponse(status: 200)
+    }
+}
