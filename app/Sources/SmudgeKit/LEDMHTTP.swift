@@ -78,6 +78,27 @@ public enum LEDMHTTP {
         return (make(Data()), pos)
     }
 
+    /// Status line and headers of a reply, with the offset where the body starts. nil until the header
+    /// block is complete. A block that is not a status line comes back with status -1.
+    public static func parseHead(_ input: Data) -> (status: Int, reason: String, headers: [String: String], bodyStart: Int)? {
+        let buf = Data(input)
+        guard let hdrEnd = buf.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+        var lines = String(decoding: buf[0..<hdrEnd.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
+        let statusLine = lines.removeFirst()
+        let parts = statusLine.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+        guard parts.count >= 2, parts[0].hasPrefix("HTTP/"), let code = Int(parts[1]) else {
+            return (-1, "junk", [:], hdrEnd.upperBound)
+        }
+        var headers: [String: String] = [:]
+        for l in lines {
+            if let c = l.firstIndex(of: ":") {
+                headers[l[..<c].lowercased().trimmingCharacters(in: .whitespaces)] =
+                    l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return (code, parts.count > 2 ? String(parts[2]) : "", headers, hdrEnd.upperBound)
+    }
+
     // Request formats copied from HPLIP (base/device.py, base/maint.py).
 
     public static func getRequest(_ path: String) -> Data {

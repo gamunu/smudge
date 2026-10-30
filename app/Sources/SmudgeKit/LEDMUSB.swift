@@ -13,6 +13,7 @@ public enum LEDMError: Error, LocalizedError {
     case noLEDM
     case badReply(String)
     case http(Int, String)
+    case canceled
 
     public static let noInterfaceReason = "This printer does not report ink levels over USB"
 
@@ -25,6 +26,7 @@ public enum LEDMError: Error, LocalizedError {
         case .timeout: return "Printer did not answer in time"
         case .badReply(let m): return "Unexpected printer reply: \(m)"
         case .http(let c, let m): return "Printer returned HTTP \(c) \(m)"
+        case .canceled: return "Canceled"
         }
     }
 }

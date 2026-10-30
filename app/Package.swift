@@ -29,6 +29,12 @@ let package = Package(
             dependencies: ["SmudgeKit"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // Per-user agent that serves attached HP scanners to Image Capture over loopback eSCL.
+        .executableTarget(
+            name: "smudge-scand",
+            dependencies: ["SmudgeKit", "SmudgeScan"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "Smudge",
             dependencies: [

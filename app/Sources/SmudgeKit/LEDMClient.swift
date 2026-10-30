@@ -44,6 +44,17 @@ public final class LEDMClient: @unchecked Sendable {
         try send(LEDMHTTP.postFooterRequest(path, xml: xml), expectRoot: nil, retry: false)
     }
 
+    /// Opens the interface once and keeps it for the whole closure, under the client's lock. Other
+    /// requests on this client wait until the closure returns.
+    public func withSession<T>(_ body: (LEDMSession) throws -> T) throws -> T {
+        lock.lock(); defer { lock.unlock() }
+        let conn = try LEDMUSBConnection(serial: serial, channel: channel)
+        conn.drain(quiet: 1.0)
+        let session = LEDMSession(conn: conn)
+        if verbose { session.log = { [self] in log($0) } }
+        return try body(session)
+    }
+
     // MARK: async wrappers (run on the serial LEDM queue)
 
     public func getAsync(_ path: String, expectRoot: String? = nil) async throws -> LEDMResponse {
@@ -140,4 +151,97 @@ public final class LEDMClients: @unchecked Sendable {
     }
 
     public var count: Int { lock.lock(); defer { lock.unlock() }; return clients.count }
+}
+
+/// Several requests over one open interface. Created by LEDMClient.withSession.
+public final class LEDMSession {
+    private let conn: LEDMUSBConnection
+    /// Called with each request line and reply status.
+    public var log: ((String) -> Void)?
+
+    init(conn: LEDMUSBConnection) { self.conn = conn }
+
+    private func requestLine(_ request: Data) -> String {
+        String(decoding: request.prefix(while: { $0 != 0x0d }), as: UTF8.self)
+    }
+
+    /// Sends a request and waits for the reply, dropping junk and replies to earlier requests.
+    public func send(_ request: Data, expectRoot: String?, timeout: TimeInterval) throws -> LEDMResponse {
+        log?(">> \(requestLine(request))")
+        try conn.write(request)
+        var reader = LEDMReplyReader(expectRoot: expectRoot, log: log)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let resp = reader.feed(try conn.read(timeout: 1.0)) {
+                log?("<< \(resp.status) \(resp.reason) (\(resp.body.count) bytes)")
+                return resp
+            }
+        }
+        throw LEDMError.timeout
+    }
+
+    /// Streams the body of a GET reply into a file and returns the byte count. The body is never held
+    /// whole in memory. Throws `.timeout` when no data arrives for `idleTimeout` seconds and
+    /// `.canceled` when `isCancelled` turns true.
+    public func download(_ request: Data, to file: FileHandle, idleTimeout: TimeInterval,
+                         progress: (Int) -> Void, isCancelled: () -> Bool) throws -> Int {
+        log?(">> \(requestLine(request))")
+        try conn.write(request)
+        var head = Data()
+        var headDone = false
+        var skipped400 = false
+        var chunked = false
+        var decoder = ChunkedDecoder()
+        var remaining: Int?
+        var written = 0
+        var finished = false
+        var last = Date()
+        while !finished {
+            if isCancelled() { throw LEDMError.canceled }
+            let got = try conn.read(timeout: 1.0)
+            if got.isEmpty {
+                if Date().timeIntervalSince(last) > idleTimeout { throw LEDMError.timeout }
+                continue
+            }
+            last = Date()
+            var payload = got
+            if !headDone {
+                head.append(got)
+                payload = Data()
+                while !headDone, let h = LEDMHTTP.parseHead(head) {
+                    let rest = Data(head.dropFirst(h.bodyStart))
+                    head = rest
+                    if h.status < 0 || h.status == 100 { continue }
+                    if h.status == 400, !skipped400 { skipped400 = true; continue }
+                    guard h.status == 200 else { throw LEDMError.http(h.status, h.reason) }
+                    log?("<< \(h.status) \(h.reason) \(h.headers["transfer-encoding"] ?? h.headers["content-length"] ?? "")")
+                    headDone = true
+                    chunked = (h.headers["transfer-encoding"] ?? "").lowercased().contains("chunked")
+                    remaining = h.headers["content-length"].flatMap { Int($0) }
+                    payload = rest
+                    head = Data()
+                }
+                if !headDone { continue }
+            }
+            let body: Data
+            if chunked {
+                let r = try decoder.feed(payload)
+                body = r.body
+                finished = r.done
+            } else if let rem = remaining {
+                body = payload.prefix(rem)
+                remaining = rem - body.count
+                finished = remaining == 0
+            } else {
+                throw LEDMError.badReply("page reply has no length")
+            }
+            if !body.isEmpty {
+                try file.write(contentsOf: body)
+                written += body.count
+                progress(written)
+            }
+        }
+        log?("<< body \(written) bytes")
+        return written
+    }
 }
