@@ -120,6 +120,40 @@ is expected to match):
 - HPLIP sends no fields for Sharpening or BwThreshold. HPLIP gets K1
   (black and white) by asking for Gray and thresholding on the host.
 
+### Measured on the 2336 (probe)
+
+`smudge-scand --probe`, one scan per run, with the printer's alignment
+page on the glass:
+
+- **Job flow.** POST returns `201` with `Location: /Jobs/JobList/<n>`.
+  The first job replies show `PreScanPage` with `PageState
+  PreparingScan`. Then `ReadyToUpload` with
+  `BinaryURL /Scan/Jobs/<n>/Pages/1`, and the reply also carries
+  `ImageWidth`, `ImageHeight` and `BytesPerLine`. After the download the
+  job is `Completed`, with `PostScanPage`, `UploadCompleted` and
+  `TotalLines`. Ending the poll early without a cancel leaves the
+  printer scanning the whole page.
+- **Raw works**, although HPLIP never asks for it. The data is headerless
+  rows, `floor(Width*res/300)` pixels wide and `floor(Height*res/300)`
+  rows. Gray is 1 byte per pixel, and color is interleaved RGB at 3
+  bytes. There is no row padding. At 75 dpi, full glass: 637 x 877,
+  558649 bytes gray and 1675947 color.
+- **ToneMap is applied by the device.** At 75 dpi gray, the mean and
+  spread against the default (1000/1000, mean 242.5, sd 41.7):
+  Brightness 0 gives 177.0, Brightness 2000 gives 248.4, Contrast 0
+  gives sd 20.7, and Contrast 2000 gives sd 49.9. Neutral is 1000, the
+  range is 0 to 2000.
+- **Timing.** At 75 dpi the page is ready in 1 to 4 s and the job takes
+  5 to 6 s. At 1200 dpi color Jpeg, full glass (10200 x 14032, 5.6 MB)
+  the page is ready at 20 s and the download runs until 271 s, with
+  data arriving all the way through while the head moves. The probe
+  peaked at 84 MB resident.
+- **Cancel.** A PUT with the Canceled job document during a 600 dpi
+  page download returns 200. The job ends `Canceled` with
+  `CanceledByDevice`, and the scanner is Idle within 2 s.
+- **launchd.** `--probe-bonjour` run from a LaunchAgent registered
+  `_uscan._tcp` local-only, and `dns-sd -lo -B` listed it.
+
 ## Goals
 
 - Every HP USB printer that has an ff/cc/0 interface answering
