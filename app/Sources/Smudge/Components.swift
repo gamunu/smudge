@@ -97,6 +97,7 @@ extension StatusStore.Health {
     var symbol: String {
         switch self {
         case .ready: return "checkmark.circle.fill"
+        case .scanning: return "scanner.fill"
         case .printing: return "printer.fill"
         case .attention: return "exclamationmark.triangle.fill"
         case .disconnected: return "bolt.slash.fill"
@@ -105,7 +106,7 @@ extension StatusStore.Health {
     var color: Color {
         switch self {
         case .ready: return .green
-        case .printing: return .blue
+        case .scanning, .printing: return .blue
         case .attention: return .orange
         case .disconnected: return .red
         }

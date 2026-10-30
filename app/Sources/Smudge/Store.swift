@@ -22,6 +22,8 @@ final class StatusStore: ObservableObject {
     }
     /// USB connection per queue name. A queue that is not USB, or has no serial, has no entry.
     @Published var connection: [String: Bool] = [:]
+    /// The selected printer's scanner, read on each poll.
+    @Published var scanner: ScannerState = .none
     /// Whether the selected printer speaks LEDM over USB.
     @Published var ledmSupport: LEDMSupport = .unknown
     private var currentSerial: String?
@@ -56,6 +58,7 @@ final class StatusStore: ObservableObject {
         ledmSupport = .unknown
         status = nil
         usbPresent = nil
+        scanner = .none
         jobs = []
         queueStuck = false
         stuckRule = StuckQueueRule()
@@ -107,7 +110,7 @@ final class StatusStore: ObservableObject {
     static let defaultInkSeconds = 60.0
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
-            "notificationsEnabled": true, "showMenuBar": true,
+            "notificationsEnabled": true, "showMenuBar": true, ScannerState.sharingKey: true,
             "pollSeconds": defaultPollSeconds, "inkSeconds": defaultInkSeconds,
         ])
     }
@@ -133,6 +136,7 @@ final class StatusStore: ObservableObject {
 
     var iconName: String {
         if hasProblem { return "exclamationmark.triangle.fill" }
+        if scanner == .scanning { return "scanner.fill" }
         if isBusy { return "printer.fill" }
         return "printer"
     }
@@ -161,6 +165,7 @@ final class StatusStore: ObservableObject {
         if PreviewMode.isActive { return nil }
         if usbPresent == false { return "The printer is not connected over USB." }
         if case .unavailable(let why) = ledmSupport { return "\(why), so maintenance is not available." }
+        if scanner == .scanning { return "The scanner is in use. Wait for the scan to finish." }
         if maint.isBusy { return "A maintenance job is running." }
         if jobs.contains(where: \.isActive) { return "A print job is active. Wait for it to finish or cancel it." }
         if isCalibrating { return Self.calibratingNote }
@@ -180,13 +185,14 @@ final class StatusStore: ObservableObject {
         return false
     }
 
-    enum Health { case ready, printing, attention, disconnected }
+    enum Health { case ready, scanning, printing, attention, disconnected }
 
     var health: Health {
         guard let s = status else { return .disconnected }
         if usbPresent == false || s.error != nil { return .disconnected }
         if s.stateCode == 5 || s.reasons.contains(where: StatusText.isProblem) { return .attention }
         if let ink = ink, ink.cartridges.contains(where: { $0.state == .empty || $0.state == .missing }) { return .attention }
+        if scanner == .scanning { return .scanning }
         if isBusy { return .printing }
         return .ready
     }
@@ -194,6 +200,7 @@ final class StatusStore: ObservableObject {
     var healthTitle: String {
         switch health {
         case .ready: return "Ready"
+        case .scanning: return "Scanning"
         case .printing: return isCalibrating && activeJob == nil ? "Aligning" : "Printing"
         case .attention: return "Needs attention"
         case .disconnected: return "Disconnected"
@@ -236,6 +243,7 @@ final class StatusStore: ObservableObject {
         if out.isEmpty {
             switch health {
             case .ready: out.append("The printer is idle and can take a job.")
+            case .scanning: out.append("The scanner is in use.")
             case .printing: out.append(activeJob.map { "Printing \($0.title)" } ?? "The printer is working.")
             default: break
             }
@@ -324,6 +332,8 @@ final class StatusStore: ObservableObject {
         usbPresent = snap.usb
         jobs = snap.jobs
         updateDevice()
+        scanner = ScannerState.resolve(hasInterface: snap.scanInterface, sharing: ScannerState.sharingEnabled,
+                                       activity: snap.scanActivity)
         updateStale()
         checkNotifications(snap.jobs)
         await refreshLEDM()
@@ -416,6 +426,8 @@ struct Snapshot: Sendable {
     var usb: Bool?
     var jobs: [PrintJob] = []
     var connection: [String: Bool] = [:]
+    var scanInterface = false
+    var scanActivity: PrinterActivity?
 
     static func filtered(_ all: [PrinterInfo]) -> [PrinterInfo] { PrinterChoice.shown(all) }
 
@@ -439,6 +451,13 @@ struct Snapshot: Sendable {
         snap.status = st
         snap.usb = PrinterChoice.connection(of: target, connected: connected)
         snap.jobs = Cups.jobs(for: target.name, limit: 100)
+        if snap.usb == true {
+            let serial = DeviceURI.serial(st.deviceURI)
+            snap.scanInterface = ScannerState.hasScanInterface(serial: serial, in: USBScan.devices())
+            if snap.scanInterface, let serial {
+                snap.scanActivity = ActivityStore().current(serial: serial, from: .scand)
+            }
+        }
         return snap
     }
 }

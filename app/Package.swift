@@ -40,6 +40,7 @@ let package = Package(
             dependencies: [
                 "CCups",
                 "SmudgeKit",
+                "SmudgeScan",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             swiftSettings: [

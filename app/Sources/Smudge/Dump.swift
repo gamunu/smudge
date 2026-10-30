@@ -3,6 +3,7 @@
 
 import Foundation
 import SmudgeKit
+import SmudgeScan
 
 /// Queue named by --printer, else the first shown queue.
 func cliPrinter() -> PrinterInfo? {
@@ -83,6 +84,7 @@ func dumpAndExit() -> Never {
                 print("LEDM error: \(error.localizedDescription)")
             }
         }
+        print(scannerLine(serial: serial))
         if st.ink.isEmpty {
             print("Ink (CUPS): not available")
         } else {
@@ -95,6 +97,33 @@ func dumpAndExit() -> Never {
         }
     }
     exit(0)
+}
+
+/// "Scanner: interface 0, <model>, 75-1200 dpi, modes color, gray, black and white", or "Scanner: none".
+/// Reads /Scan/ScanCaps over the scan interface.
+func scannerLine(serial: String?) -> String {
+    guard case .found(_, let iface) = LEDMMatch.lookup(serial: serial, in: USBScan.devices(), channel: .scan) else {
+        return "Scanner: none"
+    }
+    do {
+        let r = try LEDMClient(serial: serial, channel: .scan).withSession { s in
+            try s.send(LEDMHTTP.scanGetRequest("/Scan/ScanCaps"), expectRoot: nil, timeout: 10)
+        }
+        guard r.status == 200, let caps = LEDMScanCaps.parse(r.body) else {
+            return "Scanner: interface \(iface.number), caps not readable (HTTP \(r.status))"
+        }
+        let modes = ESCLCaps.colorModes(for: caps).map { mode -> String in
+            switch mode {
+            case .rgb24: return "color"
+            case .grayscale8: return "gray"
+            case .blackAndWhite1: return "black and white"
+            }
+        }
+        let range = [caps.resolutions.first, caps.resolutions.last].compactMap { $0 }.map(String.init).joined(separator: "-")
+        return "Scanner: interface \(iface.number), \(caps.model), \(range) dpi, modes \(modes.joined(separator: ", "))"
+    } catch {
+        return "Scanner: interface \(iface.number), error: \(error.localizedDescription)"
+    }
 }
 
 /// Debug helper: GET one LEDM resource and print the raw body.
