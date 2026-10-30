@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import Foundation
+import SmudgeKit
 import SwiftUI
 import UserNotifications
 import Combine

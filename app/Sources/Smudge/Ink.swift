@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import Foundation
+import SmudgeKit
 
 /// Tiny namespace-agnostic XML tree, enough for LEDM documents.
 final class XMLNode {

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import Foundation
+import SmudgeKit
 
 /// Queue named by --printer, else the first shown queue.
 func cliPrinter() -> PrinterInfo? {

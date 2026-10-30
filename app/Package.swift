@@ -17,10 +17,17 @@ let package = Package(
             cSettings: [.unsafeFlags(["-Wno-deprecated-declarations"])],
             linkerSettings: [.linkedLibrary("cups")]
         ),
+        // USB and LEDM transport shared by the app and the scanner agent.
+        .target(
+            name: "SmudgeKit",
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [.linkedFramework("IOKit")]
+        ),
         .executableTarget(
             name: "Smudge",
             dependencies: [
                 "CCups",
+                "SmudgeKit",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             swiftSettings: [
@@ -37,7 +44,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SmudgeTests",
-            dependencies: ["Smudge"],
+            dependencies: ["Smudge", "SmudgeKit"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

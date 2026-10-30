@@ -3,6 +3,7 @@
 
 import XCTest
 @testable import Smudge
+@testable import SmudgeKit
 
 final class DeviceURITests: XCTestCase {
     func testSerialFromURI() {
@@ -252,5 +253,19 @@ final class SelectionTests: XCTestCase {
     func testModelNameDropsTheDriverMarker() {
         XCTAssertEqual(StatusStore.model(of: q("A", "HP DeskJet 2300 series, Smudge")), "HP DeskJet 2300 series")
         XCTAssertEqual(StatusStore.model(of: q("B", "", "usb://HP/ENVY%206000%20series?serial=Z")), "ENVY 6000 series")
+    }
+}
+
+final class ScanChannelTests: XCTestCase {
+    func testScanChannelMatchesCC0Only() {
+        let dev = USBDeviceInfo(vendor: 0x03f0, product: 0x3654, serial: "CN171232SB", interfaces: [
+            USBInterfaceInfo(number: 0, interfaceClass: 255, subclass: 0xcc, protocolCode: 0),
+            USBInterfaceInfo(number: 1, interfaceClass: 7, subclass: 1, protocolCode: 2),
+            USBInterfaceInfo(number: 2, interfaceClass: 255, subclass: 4, protocolCode: 1),
+            USBInterfaceInfo(number: 3, interfaceClass: 255, subclass: 4, protocolCode: 1),
+        ], registryID: 1)
+        XCTAssertEqual(LEDMMatch.interface(of: dev, channel: .scan)?.number, 0)
+        XCTAssertEqual(LEDMMatch.interface(of: dev, channel: .management)?.number, 2)
+        XCTAssertEqual(LEDMMatch.lookup(serial: "CN171232SB", in: [dev], channel: .scan), .found(dev, dev.interfaces[0]))
     }
 }
