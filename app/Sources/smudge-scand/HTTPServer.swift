@@ -157,7 +157,7 @@ private final class HTTPConnection {
 
     // MARK: response
 
-    private static let reasons = [200: "OK", 201: "Created", 400: "Bad Request", 404: "Not Found", 503: "Service Unavailable"]
+    private static let reasons = [200: "OK", 201: "Created", 400: "Bad Request", 404: "Not Found", 500: "Internal Server Error", 503: "Service Unavailable"]
 
     private func head(_ status: Int, _ headers: [String: String], keepAlive: Bool) -> Data {
         var s = "HTTP/1.1 \(status) \(Self.reasons[status] ?? "Status")\r\n"
@@ -179,16 +179,10 @@ private final class HTTPConnection {
             send(head(res.status, headers, keepAlive: req.keepAlive) + d, then: finish(req.keepAlive))
         case .file(let url, let type):
             sendFile(url, type: type, status: res.status, headers: headers, keepAlive: req.keepAlive)
-        case .pending(let waiter):
-            // Headers go out now, so Image Capture sees a live response while the scan runs.
-            headers["Content-Type"] = waiter.contentType
+        case .stream(let stream):
+            headers["Content-Type"] = stream.contentType
             headers["Transfer-Encoding"] = "chunked"
-            send(head(res.status, headers, keepAlive: req.keepAlive)) { [weak self] in
-                DispatchQueue.global().async {
-                    let result = waiter.wait()
-                    self?.queue.async { self?.deliver(result, keepAlive: req.keepAlive) }
-                }
-            }
+            send(head(res.status, headers, keepAlive: req.keepAlive)) { [weak self] in self?.pump(stream, keepAlive: req.keepAlive) }
         }
     }
 
@@ -206,32 +200,28 @@ private final class HTTPConnection {
         })
     }
 
-    private func deliver(_ result: PageResult, keepAlive: Bool) {
-        switch result {
-        case .file(let url, _):
-            streamChunked(url, keepAlive: keepAlive)
-        case .noMorePages, .failed:
-            // The headers are gone already, so ending the connection is the only way to say no.
-            close()
-        }
-    }
-
-    /// Sends a file as 1 MB chunks, one at a time.
-    private func streamChunked(_ url: URL, keepAlive: Bool) {
-        guard let fh = try? FileHandle(forReadingFrom: url) else { close(); return }
-        func step() {
-            let data = (try? fh.read(upToCount: Self.chunkSize)) ?? Data()
-            if data.isEmpty {
-                try? fh.close()
-                send(Data("0\r\n\r\n".utf8), then: finish(keepAlive))
-                return
+    /// Sends the stream's bytes as they appear. A stream that fails ends the connection without the
+    /// terminating chunk, so the client sees an error instead of a short file.
+    private func pump(_ stream: PageStream, keepAlive: Bool) {
+        DispatchQueue.global().async { [weak self] in
+            let step = stream.next(limit: Self.chunkSize)
+            self?.queue.async {
+                guard let self else { return }
+                switch step {
+                case .data(let data):
+                    var out = Data("\(String(data.count, radix: 16))\r\n".utf8)
+                    out.append(data)
+                    out.append(Data("\r\n".utf8))
+                    self.send(out) { self.pump(stream, keepAlive: keepAlive) }
+                case .end:
+                    stream.close()
+                    self.send(Data("0\r\n\r\n".utf8), then: self.finish(keepAlive))
+                case .failed:
+                    stream.close()
+                    self.close()
+                }
             }
-            var out = Data("\(String(data.count, radix: 16))\r\n".utf8)
-            out.append(data)
-            out.append(Data("\r\n".utf8))
-            send(out) { step() }
         }
-        step()
     }
 
     private func sendFile(_ url: URL, type: String, status: Int, headers: [String: String], keepAlive: Bool) {

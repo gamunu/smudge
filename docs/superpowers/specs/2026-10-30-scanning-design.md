@@ -264,7 +264,18 @@ printer
   printing or already scanning.
 - `GET /eSCL/ScanJobs/<id>/NextDocument`: the page in the requested
   format, then 404 once the job's page has been sent. The platen
-  gives one page per job.
+  gives one page per job. Image Capture gives up on a response that
+  sends no bytes for about a minute, and a 1200 dpi scan takes 4.5
+  minutes, so the reply depends on the job. When the printer's JPEG is
+  the final file (JPEG requested, no post-processing), the reply is
+  `200 image/jpeg` with chunked encoding at once, and the agent sends
+  the page file's bytes as the printer writes them, polling every
+  200 ms. A job that ends canceled or failed mid-stream closes the
+  connection without the terminating chunk. Every other job waits up
+  to 20 s for the processed page, then replies `503` with
+  `Retry-After: 2` and no body, and the client asks again. A job
+  counts as served once a `200` page response starts, never on a 503.
+  A request while a stream is still running also gets 503.
 - `DELETE /eSCL/ScanJobs/<id>`: cancel the LEDM job if it is still
   running, release the USB interface, mark the job canceled.
 - `GET /eSCL/ScanJobs/<id>/ScanImageInfo` is optional.

@@ -8,8 +8,8 @@ public struct RouterResponse {
         case none
         case data(Data)
         case file(URL, contentType: String)
-        /// The page is not ready yet. The HTTP layer waits on this and then sends the file.
-        case pending(PageWaiter)
+        /// The printer's JPEG, sent as it arrives.
+        case stream(PageStream)
     }
 
     public var status: Int
@@ -38,6 +38,7 @@ public final class ESCLRouter: @unchecked Sendable {
     private let workDir: URL
     private let onActivity: @Sendable (Bool) -> Void
     private let blocked: @Sendable () -> Bool
+    private let pageWait: TimeInterval
 
     private let lock = NSLock()
     private let idle = NSCondition()
@@ -47,7 +48,8 @@ public final class ESCLRouter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "escl.scan", qos: .userInitiated)
 
     public init(device: ScanDevice, name: String, uuid: UUID, serial: String, tone: ToneCalibration, workDir: URL,
-                onActivity: @escaping @Sendable (Bool) -> Void, blocked: @escaping @Sendable () -> Bool = { false }) {
+                onActivity: @escaping @Sendable (Bool) -> Void, blocked: @escaping @Sendable () -> Bool = { false },
+                pageWait: TimeInterval = 20) {
         self.device = device
         self.name = name
         self.uuid = uuid
@@ -56,6 +58,7 @@ public final class ESCLRouter: @unchecked Sendable {
         self.workDir = workDir
         self.onActivity = onActivity
         self.blocked = blocked
+        self.pageWait = pageWait
         try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
     }
 
@@ -176,6 +179,10 @@ public final class ESCLRouter: @unchecked Sendable {
             case .page:
                 if job.cancelled {
                     state = .canceled; result = .noMorePages
+                } else if job.plan.isPassthrough {
+                    keep = raw
+                    state = .completed; completed = 1
+                    result = .file(raw, contentType: job.plan.output.rawValue)
                 } else {
                     try ImagePipeline.render(page: raw, plan: job.plan, resolution: job.resolution, to: out)
                     keep = out
@@ -190,7 +197,7 @@ public final class ESCLRouter: @unchecked Sendable {
             state = job.cancelled ? .canceled : .aborted
             result = job.cancelled ? .noMorePages : .failed
         }
-        try? FileManager.default.removeItem(at: raw)
+        if keep != raw { try? FileManager.default.removeItem(at: raw) }
 
         lock.lock()
         job.state = state
@@ -205,12 +212,40 @@ public final class ESCLRouter: @unchecked Sendable {
         idle.lock(); idle.broadcast(); idle.unlock()
     }
 
+    /// Passthrough jobs answer at once and stream the page while the printer writes it, because Image
+    /// Capture drops a response that stays silent for about a minute. Other jobs wait for the page and
+    /// ask the client to retry when it takes too long. The job counts as served once a page response starts.
     private func nextDocument(_ id: Int?) -> RouterResponse {
+        lock.lock()
+        guard let id, let job = jobs.job(id) else { lock.unlock(); return notFound() }
+        let passthrough = job.plan.isPassthrough
+        if job.nextDocumentServed {
+            let streaming = passthrough && job.waiter.current == nil
+            lock.unlock()
+            return streaming ? retryLater() : notFound()
+        }
+        if passthrough, job.waiter.current == nil {
+            job.nextDocumentServed = true
+            lock.unlock()
+            return RouterResponse(status: 200, body: .stream(PageStream(file: workDir.appendingPathComponent("job-\(job.id).page"),
+                                                                       contentType: job.plan.output.rawValue, waiter: job.waiter)))
+        }
+        lock.unlock()
+
+        guard let result = job.waiter.wait(timeout: pageWait) else { return retryLater() }
         lock.lock(); defer { lock.unlock() }
-        guard let id, let job = jobs.job(id), !job.nextDocumentServed else { return notFound() }
-        job.nextDocumentServed = true
-        return RouterResponse(status: 200, body: .pending(job.waiter))
+        if job.nextDocumentServed { return notFound() }
+        switch result {
+        case .file(let url, let type):
+            job.nextDocumentServed = true
+            if passthrough { return RouterResponse(status: 200, body: .stream(PageStream(file: url, contentType: type, waiter: job.waiter))) }
+            return RouterResponse(status: 200, body: .file(url, contentType: type))
+        case .noMorePages: return notFound()
+        case .failed: return RouterResponse(status: 500)
+        }
     }
+
+    private func retryLater() -> RouterResponse { RouterResponse(status: 503, headers: ["Retry-After": "2"]) }
 
     private func deleteJob(_ id: Int?) -> RouterResponse {
         lock.lock(); defer { lock.unlock() }

@@ -9,20 +9,28 @@ public enum PageResult: Equatable, Sendable {
     case failed
 }
 
-/// Lets the HTTP layer hold NextDocument open while the scan runs.
+/// Holds the outcome of a job's page so NextDocument can wait for it.
 public final class PageWaiter: @unchecked Sendable {
     private let cond = NSCondition()
     private var result: PageResult?
-    /// The type the page will have, known when the job is created so the HTTP layer can send headers early.
-    public let contentType: String
 
-    public init(contentType: String) { self.contentType = contentType }
+    public init() {}
 
-    /// Blocks until the page is ready, the job has no page or the job failed.
-    public func wait() -> PageResult {
+    /// The outcome if the job has ended, without waiting.
+    public var current: PageResult? {
         cond.lock(); defer { cond.unlock() }
-        while result == nil { cond.wait() }
-        return result!
+        return result
+    }
+
+    /// Waits up to `timeout` seconds for the page to be ready, the job to have no page or the job to fail.
+    /// Returns nil when none of that happened in time.
+    public func wait(timeout: TimeInterval) -> PageResult? {
+        let deadline = Date().addingTimeInterval(timeout)
+        cond.lock(); defer { cond.unlock() }
+        while result == nil {
+            if !cond.wait(until: deadline) { break }
+        }
+        return result
     }
 
     func resolve(_ r: PageResult) {
@@ -30,6 +38,50 @@ public final class PageWaiter: @unchecked Sendable {
         if result == nil { result = r }
         cond.broadcast()
         cond.unlock()
+    }
+}
+
+/// The page of a passthrough job, read while the printer is still writing it.
+public final class PageStream: @unchecked Sendable {
+    public enum Step: Equatable, Sendable {
+        case data(Data)
+        /// Every byte was delivered and the job finished.
+        case end
+        /// The job was canceled or failed, or the file is gone.
+        case failed
+    }
+
+    public let contentType: String
+    private let file: URL
+    private let waiter: PageWaiter
+    private let pollInterval: TimeInterval
+    private var handle: FileHandle?
+
+    init(file: URL, contentType: String, waiter: PageWaiter, pollInterval: TimeInterval = 0.2) {
+        self.file = file
+        self.contentType = contentType
+        self.waiter = waiter
+        self.pollInterval = pollInterval
+    }
+
+    /// Blocks until there are new bytes (at most `limit`) or the stream is over. Call from one thread at a time.
+    public func next(limit: Int = 1024 * 1024) -> Step {
+        while true {
+            // Read the outcome first: bytes written before the job ended are then still picked up.
+            let outcome = waiter.current
+            if handle == nil { handle = try? FileHandle(forReadingFrom: file) }
+            if let handle, let data = try? handle.read(upToCount: limit), !data.isEmpty { return .data(data) }
+            switch outcome {
+            case .file?: return handle == nil ? .failed : .end
+            case .noMorePages?, .failed?: return .failed
+            case nil: Thread.sleep(forTimeInterval: pollInterval)
+            }
+        }
+    }
+
+    public func close() {
+        try? handle?.close()
+        handle = nil
     }
 }
 
@@ -53,7 +105,7 @@ final class ScanJobRecord: @unchecked Sendable {
         self.id = id
         self.plan = plan
         self.resolution = resolution
-        self.waiter = PageWaiter(contentType: plan.output.rawValue)
+        self.waiter = PageWaiter()
     }
 
     var cancelled: Bool {

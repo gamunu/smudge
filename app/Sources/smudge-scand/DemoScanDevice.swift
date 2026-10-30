@@ -21,14 +21,20 @@ final class DemoScanDevice: ScanDevice, @unchecked Sendable {
     func scannerState() throws -> String { "Idle" }
 
     func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool) throws -> ScanOutcome {
-        let end = Date().addingTimeInterval(delay)
-        while Date() < end {
-            if isCancelled() { return .canceledByClient }
-            Thread.sleep(forTimeInterval: 0.05)
+        let start = Date()
+        /// Waits until `delay * fraction` seconds have passed since the scan began.
+        func wait(until fraction: Double) -> Bool {
+            let end = start.addingTimeInterval(delay * fraction)
+            while Date() < end {
+                if isCancelled() { return false }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            return true
         }
         let w = request.width * request.resolution / 300, h = request.height * request.resolution / 300
         let channels = request.colorSpace == "Color" ? 3 : 1
         if request.format == .raw {
+            if !wait(until: 1) { return .canceledByClient }
             FileManager.default.createFile(atPath: file.path, contents: nil)
             let fh = try FileHandle(forWritingTo: file)
             defer { try? fh.close() }
@@ -44,14 +50,26 @@ final class DemoScanDevice: ScanDevice, @unchecked Sendable {
         }
         let space = channels == 3 ? CGColorSpaceCreateDeviceRGB() : CGColorSpaceCreateDeviceGray()
         let info = channels == 3 ? CGImageAlphaInfo.noneSkipLast.rawValue : CGImageAlphaInfo.none.rawValue
+        let jpeg = NSMutableData()
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: space, bitmapInfo: info),
-              let dest = CGImageDestinationCreateWithURL(file as CFURL, "public.jpeg" as CFString, 1, nil) else { return .noDocument }
+              let dest = CGImageDestinationCreateWithData(jpeg, "public.jpeg" as CFString, 1, nil) else { return .noDocument }
         ctx.setFillColor(gray: 0.5, alpha: 1)
         ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
         ctx.setFillColor(gray: 0.1, alpha: 1)
         ctx.fill(CGRect(x: w / 4, y: h / 4, width: w / 2, height: h / 2))
         CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)
         guard CGImageDestinationFinalize(dest) else { return .noDocument }
-        return .page(bytes: (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0)
+
+        // Like the printer, the file appears when the scan starts and grows until it ends: one piece a second.
+        let data = jpeg as Data
+        let pieces = max(1, Int(delay.rounded()))
+        FileManager.default.createFile(atPath: file.path, contents: nil)
+        let fh = try FileHandle(forWritingTo: file)
+        defer { try? fh.close() }
+        for i in 0..<pieces {
+            if !wait(until: Double(i + 1) / Double(pieces)) { return .canceledByClient }
+            try fh.write(contentsOf: data[data.count * i / pieces..<data.count * (i + 1) / pieces])
+        }
+        return .page(bytes: data.count)
     }
 }

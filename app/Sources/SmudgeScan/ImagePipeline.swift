@@ -50,6 +50,9 @@ public struct ScanPlan: Equatable, Sendable {
         self.post = post
         self.output = output
     }
+
+    /// True when the printer's JPEG is the final file, so it can be sent as it arrives.
+    public var isPassthrough: Bool { request.format == .jpeg && output == .jpeg && post == PostProcess() }
 }
 
 public enum ScanPlanner {
@@ -112,7 +115,7 @@ public enum ImagePipeline {
     public static func render(page: URL, plan: ScanPlan, resolution: Int, to output: URL) throws {
         let post = plan.post
         let isRaw = plan.request.format == .raw
-        if !isRaw, plan.output == .jpeg, post == PostProcess() {
+        if plan.isPassthrough {
             try? FileManager.default.removeItem(at: output)
             try FileManager.default.copyItem(at: page, to: output)
             return
