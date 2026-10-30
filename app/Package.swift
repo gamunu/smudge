@@ -23,6 +23,12 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [.linkedFramework("IOKit")]
         ),
+        // eSCL and LEDM scan translation. No USB, so it tests without hardware.
+        .target(
+            name: "SmudgeScan",
+            dependencies: ["SmudgeKit"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "Smudge",
             dependencies: [
@@ -45,6 +51,11 @@ let package = Package(
         .testTarget(
             name: "SmudgeTests",
             dependencies: ["Smudge", "SmudgeKit"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "SmudgeScanTests",
+            dependencies: ["SmudgeScan", "SmudgeKit"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

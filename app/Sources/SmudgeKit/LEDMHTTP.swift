@@ -108,6 +108,40 @@ public enum LEDMHTTP {
         return req
     }
 
+    // Scan channel requests, copied from HPLIP (scan/sane/bb_ledm.c).
+
+    /// POST /Scan/Jobs. HPLIP counts the zero chunk footer in Content-Length and sends it after the body.
+    public static func scanPostRequest(xml: String) -> Data {
+        let footer = "\r\n0\r\n\r\n"
+        let body = Data(xml.utf8)
+        var req = Data(("POST /Scan/Jobs HTTP/1.1\r\nHost: localhost\r\nUser-Agent: hplip\r\n"
+            + "Accept: text/plain, */*\r\nAccept-Language: en-us,en\r\nAccept-Charset: ISO-8859-1,utf-8\r\n"
+            + "Content-Type: */*; charset=UTF-8\r\nX-Requested-With: XMLHttpRequest\r\n"
+            + "Content-Length: \(body.count + footer.utf8.count)\r\nCookie: AccessCounter=new\r\n"
+            + "Pragma: no-cache\r\nCache-Control: no-cache\r\n\r\n").utf8)
+        req.append(body)
+        req.append(Data(footer.utf8))
+        return req
+    }
+
+    /// GET of a job or page URL on the scan channel.
+    public static func scanGetRequest(_ path: String) -> Data {
+        Data(("GET \(path) HTTP/1.1\r\nHost: localhost\r\nUser-Agent: hplip\r\n"
+            + "Accept: text/plain\r\nAccept-Language: en-us,en\r\nAccept-Charset:utf-8\r\n"
+            + "X-Requested-With: XMLHttpRequest\r\nCookie: AccessCounter=new\r\n\r\n").utf8)
+    }
+
+    /// PUT that cancels a job.
+    public static func scanCancelRequest(_ path: String, xml: String) -> Data {
+        let body = Data(xml.utf8)
+        var req = Data(("PUT \(path) HTTP/1.1\r\nHost: localhost\r\nUser-Agent: hplip\r\n"
+            + "Accept: text/plain\r\nAccept-Language: en-us,en\r\nAccept-Charset:utf-8\r\n"
+            + "Content-Type: text/xml\r\nX-Requested-With: XMLHttpRequest\r\nReferer: localhost\r\n"
+            + "Content-Length: \(body.count)\r\nCookie: AccessCounter=new\r\n\r\n").utf8)
+        req.append(body)
+        return req
+    }
+
     /// Local name of the first XML element, namespace prefix removed.
     public static func rootElement(_ body: Data) -> String? {
         let s = String(decoding: body.prefix(4096), as: UTF8.self)
@@ -155,3 +189,50 @@ public struct LEDMReplyReader {
     }
 }
 
+
+/// Decodes an HTTP chunked body a few bytes at a time. Holds at most one partial chunk header.
+public struct ChunkedDecoder {
+    private enum State { case size, data(Int), dataEnd(Int), trailer, done }
+    private var state = State.size
+    private var line = Data()
+
+    public init() {}
+
+    /// Returns the body bytes found in this input and whether the last chunk and trailers are complete.
+    public mutating func feed(_ bytes: Data) throws -> (body: Data, done: Bool) {
+        var out = Data()
+        var i = bytes.startIndex
+        while i < bytes.endIndex {
+            switch state {
+            case .size:
+                let b = bytes[i]; i += 1
+                if b != 0x0a {
+                    line.append(b)
+                    if line.count > 32 { throw LEDMError.badReply("chunk size line too long") }
+                    continue
+                }
+                let text = String(decoding: line, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                line.removeAll(keepingCapacity: true)
+                let hex = text.split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+                guard let size = Int(hex, radix: 16), size >= 0 else { throw LEDMError.badReply("bad chunk size '\(text)'") }
+                state = size == 0 ? .trailer : .data(size)
+            case .data(let n):
+                let take = min(n, bytes.endIndex - i)
+                out.append(bytes[i..<i + take])
+                i += take
+                state = take == n ? .dataEnd(2) : .data(n - take)
+            case .dataEnd(let n):
+                i += 1
+                state = n <= 1 ? .size : .dataEnd(n - 1)
+            case .trailer:
+                let b = bytes[i]; i += 1
+                if b != 0x0a { if b != 0x0d { line.append(b) }; continue }
+                if line.isEmpty { state = .done } else { line.removeAll(keepingCapacity: true) }
+            case .done:
+                i = bytes.endIndex
+            }
+        }
+        if case .done = state { return (out, true) }
+        return (out, false)
+    }
+}
