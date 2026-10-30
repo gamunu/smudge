@@ -61,7 +61,7 @@ func runProbe(value: @escaping (String) -> String?, flag: (String) -> Bool) -> N
 
 /// Registers the scanner Bonjour record for 60 s, for the launchd check.
 func runProbeBonjour() -> Never {
-    let uuid = ScannerIdentityProbe.uuid
+    let uuid = ScannerIdentity.uuid(serial: "probe").uuidString
     do {
         let ad = try BonjourAdvert(name: "Smudge Probe", port: 8, txt: ScanTXT.records(name: "Smudge Probe", formats: ["image/jpeg"], uuid: uuid))
         err("registered _uscan._tcp local-only")
@@ -73,5 +73,3 @@ func runProbeBonjour() -> Never {
         exit(1)
     }
 }
-
-enum ScannerIdentityProbe { static let uuid = "4E2F6A1C-2336-4000-8000-00000000A1B2" }

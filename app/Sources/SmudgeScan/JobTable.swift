@@ -13,8 +13,10 @@ public enum PageResult: Equatable, Sendable {
 public final class PageWaiter: @unchecked Sendable {
     private let cond = NSCondition()
     private var result: PageResult?
+    /// The type the page will have, known when the job is created so the HTTP layer can send headers early.
+    public let contentType: String
 
-    public init() {}
+    public init(contentType: String) { self.contentType = contentType }
 
     /// Blocks until the page is ready, the job has no page or the job failed.
     public func wait() -> PageResult {
@@ -43,7 +45,7 @@ final class ScanJobRecord: @unchecked Sendable {
     let resolution: Int
     var pageFile: URL?
     var nextDocumentServed = false
-    let waiter = PageWaiter()
+    let waiter: PageWaiter
     private let flagLock = NSLock()
     private var cancelFlag = false
 
@@ -51,6 +53,7 @@ final class ScanJobRecord: @unchecked Sendable {
         self.id = id
         self.plan = plan
         self.resolution = resolution
+        self.waiter = PageWaiter(contentType: plan.output.rawValue)
     }
 
     var cancelled: Bool {

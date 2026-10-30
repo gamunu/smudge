@@ -17,7 +17,9 @@ if args.contains("--probe") {
     runProbe(value: value, flag: { args.contains($0) })
 } else if args.contains("--probe-bonjour") {
     runProbeBonjour()
+} else if args.contains("--serve") {
+    runServe(serial: value("--serial"), demo: args.contains("--demo"), demoDelay: Double(value("--delay") ?? "") ?? 1)
 } else {
-    FileHandle.standardError.write(Data("usage: smudge-scand --probe [--serial S] [--res N] [--format Jpeg|Raw] [--color Color|Gray] --out DIR\n".utf8))
+    FileHandle.standardError.write(Data("usage: smudge-scand [--serve [--serial S] [--demo] | --probe [--serial S] [--res N] [--format Jpeg|Raw] [--color Color|Gray] --out DIR\n".utf8))
     exit(2)
 }

@@ -80,4 +80,17 @@ final class ESCLTests: XCTestCase {
         XCTAssertTrue(x.contains("<pwg:JobStateReason>JobScanning</pwg:JobStateReason>"))
         XCTAssertNotNil(try? XMLDocument(xmlString: x))
     }
+
+    func testIdentityIsStablePerSerial() {
+        XCTAssertEqual(ScannerIdentity.uuid(serial: "CN171232SB"), ScannerIdentity.uuid(serial: "CN171232SB"))
+        XCTAssertNotEqual(ScannerIdentity.uuid(serial: "CN171232SB"), ScannerIdentity.uuid(serial: "X"))
+        XCTAssertEqual(ScannerIdentity.name(model: "DeskJet 2300 series", serial: "CN171232SB", sameModelCount: 1), "DeskJet 2300 series")
+        XCTAssertEqual(ScannerIdentity.name(model: "DeskJet 2300 series", serial: "CN171232SB", sameModelCount: 2), "DeskJet 2300 series (CN171232SB)")
+    }
+
+    func testIdentityIsAVersion5UUID() {
+        let u = ScannerIdentity.uuid(serial: "CN171232SB").uuidString
+        XCTAssertEqual(u[u.index(u.startIndex, offsetBy: 14)], "5")
+        XCTAssertTrue(["8", "9", "A", "B"].contains(u[u.index(u.startIndex, offsetBy: 19)]))
+    }
 }
