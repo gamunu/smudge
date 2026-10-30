@@ -20,14 +20,10 @@ final class LEDMScanJobTests: XCTestCase {
     }
 
     func testJobSnapshotReadyToUpload() {
-        let xml = """
-        <j:Job xmlns:j="http://www.hp.com/schemas/imaging/con/ledm/jobs/2009/04/30"><j:JobState>Processing</j:JobState>\
-        <ScanJob xmlns="http://www.hp.com/schemas/imaging/con/cnx/scan/2008/08/19"><PreScanPage><PageState>ReadyToUpload</PageState>\
-        <BinaryURL>/Scan/Jobs/3/Pages/1</BinaryURL></PreScanPage></ScanJob></j:Job>
-        """
-        let s = LEDMJobSnapshot.parse(Data(xml.utf8))
+        let s = LEDMJobSnapshot.parse(Data(ScanFixtures.jobReadyToUpload2336.utf8))
         XCTAssertEqual(s.jobState, "Processing"); XCTAssertEqual(s.pageState, "ReadyToUpload")
-        XCTAssertEqual(s.binaryURL, "/Scan/Jobs/3/Pages/1"); XCTAssertTrue(s.hasPreScanPage)
+        XCTAssertEqual(s.binaryURL, "/Scan/Jobs/14/Pages/1"); XCTAssertTrue(s.hasPreScanPage)
+        XCTAssertEqual(LEDMJobStep.next(s), .upload("/Scan/Jobs/14/Pages/1"))
     }
 
     func testJobSnapshotWithoutPageHasNoPreScanPage() {

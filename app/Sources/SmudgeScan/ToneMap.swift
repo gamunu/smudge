@@ -19,7 +19,7 @@ public struct ToneCalibration: Sendable {
         self.deviceApplies = deviceApplies
     }
 
-    public static let deskJet2300 = ToneCalibration(neutral: 1000, min: 0, max: 2000, deviceApplies: false)
+    public static let deskJet2300 = ToneCalibration(neutral: 1000, min: 0, max: 2000, deviceApplies: true)
 
     /// eSCL 1000, or nil, maps to `neutral`. 0 maps to `min` and 2000 to `max`, linear on each side.
     public func device(_ escl: Int?) -> Int {
