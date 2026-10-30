@@ -5,7 +5,7 @@
 // the flatbed, scans once and exits 0 when a file arrives.
 //
 //   scan-probe --name SUBSTR --res N --mode color|gray|bw --format jpeg|png|tiff|pdf --out DIR
-//              [--width W --height H] [--timeout SECONDS]
+//              [--width W --height H] [--timeout SECONDS] [--cancel-after SECONDS]
 //
 // Prints one line on success: file=<path> area=<w>x<h> (1/300 inch).
 import Foundation
@@ -112,6 +112,13 @@ final class Probe: NSObject, ICDeviceBrowserDelegate, ICScannerDeviceDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             print("unit state later \(fu.state.rawValue)")
             if CommandLine.arguments.contains("--overview") { scanner.requestOverviewScan() } else { scanner.requestScan() }
+            if let after = arg("--cancel-after").flatMap(Double.init) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + after) {
+                    print("cancelling")
+                    scanner.cancelScan()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { print("cancelled"); exit(0) }
+                }
+            }
         }
         print("requested;")
     }
@@ -121,7 +128,7 @@ final class Probe: NSObject, ICDeviceBrowserDelegate, ICScannerDeviceDelegate {
     func scannerDevice(_ scanner: ICScannerDevice, didCompleteOverviewScanWithError error: Error?) { print("overview done: \(String(describing: error))"); exit(error == nil ? 0 : 1) }
 
     func scannerDevice(_ scanner: ICScannerDevice, didCompleteScanWithError error: Error?) {
-        if let error { fail("scan: \(error)") }
+        if let error { if arg("--cancel-after") != nil { print("cancelled: \(error)"); exit(0) }; fail("scan: \(error)") }
         guard let url = scanned else { fail("scan finished with no file") }
         print("file=\(url.path) area=\(area)")
         exit(0)
