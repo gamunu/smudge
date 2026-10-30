@@ -21,10 +21,15 @@ OUT="$ROOT/build/app.noindex/$APP_NAME.app"
 
 cd "$ROOT/app"
 swift build -c release
+swift build -c release --product smudge-scand
 BIN_DIR=$(swift build -c release --show-bin-path)
 
 SPARKLE_FW="$ROOT/app/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 [ -d "$SPARKLE_FW" ] || { echo "missing $SPARKLE_FW" >&2; exit 1; }
+
+# The scanner agent ships next to the app bundle, not inside it. build-pkg.sh installs it.
+cp "$BIN_DIR/smudge-scand" "$ROOT/build/app.noindex/smudge-scand"
+codesign -s - -f "$ROOT/build/app.noindex/smudge-scand"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/Contents/MacOS" "$OUT/Contents/Resources" "$OUT/Contents/Frameworks"

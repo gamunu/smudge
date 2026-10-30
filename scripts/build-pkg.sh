@@ -4,7 +4,7 @@
 
 # Build one unsigned installer package into build/. Does not install anything.
 # It installs the CUPS driver (filter and PPDs), the firmware tools for the
-# LaserJets that need firmware after every power-on, and /Applications/Smudge.app.
+# LaserJets that need firmware after every power-on, the scanner agent, and /Applications/Smudge.app.
 # The version comes from scripts/version.sh (VERSION env, git tag vX.Y.Z, VERSION file).
 set -euo pipefail
 
@@ -22,6 +22,7 @@ rm -rf "$stage" "$root/build/component.pkg" "$root/build/component.plist"
 mkdir -p "$stage/Library/Printers/smudge/filter" \
          "$stage/Library/Printers/smudge/bin" \
          "$stage/Library/LaunchDaemons" \
+         "$stage/Library/LaunchAgents" \
          "$stage/Library/Printers/PPDs/Contents/Resources" \
          "$stage/Applications"
 
@@ -30,6 +31,9 @@ install -m 755 "$root/build/hpcups" "$stage/Library/Printers/smudge/filter/hpcup
 install -m 755 "$root/scripts/fetch-firmware.sh" "$stage/Library/Printers/smudge/bin/smudge-fetch-firmware"
 install -m 755 "$root/scripts/smudge-firmware-load" "$stage/Library/Printers/smudge/bin/smudge-firmware-load"
 install -m 644 "$root/scripts/io.github.gamunu.smudge.firmware.plist" "$stage/Library/LaunchDaemons/"
+# Scanner agent: serves attached HP scanners to Image Capture over loopback.
+install -m 755 "$root/build/app.noindex/smudge-scand" "$stage/Library/Printers/smudge/bin/smudge-scand"
+install -m 644 "$root/scripts/io.github.gamunu.smudge.scand.plist" "$stage/Library/LaunchAgents/"
 pkgscripts="$root/build/pkgscripts"
 rm -rf "$pkgscripts"
 mkdir -p "$pkgscripts"

@@ -3,8 +3,16 @@
 # Copyright (C) 2026 Gamunu Balagalla
 
 # Installer postinstall: start the firmware loader's LaunchDaemon now, so a
-# printer that is already plugged in and powered on is served without a reboot.
+# printer that is already plugged in and powered on is served without a reboot,
+# and start the scanner agent for the user at the console.
 plist=/Library/LaunchDaemons/io.github.gamunu.smudge.firmware.plist
 launchctl bootout system "$plist" > /dev/null 2>&1 || true
 launchctl bootstrap system "$plist" > /dev/null 2>&1 || true
+
+agent=/Library/LaunchAgents/io.github.gamunu.smudge.scand.plist
+uid=$(stat -f %u /dev/console 2> /dev/null || echo 0)
+if [ "$uid" -gt 0 ]; then
+    launchctl bootout "gui/$uid" "$agent" > /dev/null 2>&1 || true
+    launchctl bootstrap "gui/$uid" "$agent" > /dev/null 2>&1 || true
+fi
 exit 0
