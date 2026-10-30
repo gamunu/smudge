@@ -151,6 +151,10 @@ page on the glass:
 - **Cancel.** A PUT with the Canceled job document during a 600 dpi
   page download returns 200. The job ends `Canceled` with
   `CanceledByDevice`, and the scanner is Idle within 2 s.
+- **Printing during a scan.** A one-page CUPS job sent 10 s into a
+  600 dpi color scan left the queue within 5 s and printed correctly.
+  The scan completed undamaged (5100 x 7016, 71 s), and the scanner
+  returned to Idle. The printer handles the overlap itself.
 - **launchd.** `--probe-bonjour` run from a LaunchAgent registered
   `_uscan._tcp` local-only, and `dns-sd -lo -B` listed it.
 
