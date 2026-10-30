@@ -53,4 +53,18 @@ final class LEDMScanJobTests: XCTestCase {
         XCTAssertTrue(cancel.contains("Cookie: AccessCounter=new"))
         XCTAssertTrue(cancel.contains("<j:JobState>Canceled</j:JobState>"))
     }
+
+    func testJobWithoutPageKeepsWaiting() {
+        // The first job reply after the POST has no page yet. Ending the job there left the printer scanning.
+        let s = LEDMJobSnapshot.parse(Data("<j:Job xmlns:j=\"x\"><j:JobState>Processing</j:JobState></j:Job>".utf8))
+        XCTAssertEqual(LEDMJobStep.next(s), .wait)
+    }
+
+    func testJobStepEnds() {
+        XCTAssertEqual(LEDMJobStep.next(LEDMJobSnapshot(pageState: "ReadyToUpload", binaryURL: "/Scan/Jobs/3/Pages/1")), .upload("/Scan/Jobs/3/Pages/1"))
+        XCTAssertEqual(LEDMJobStep.next(LEDMJobSnapshot(pageState: "ReadyToUpload")), .wait)
+        XCTAssertEqual(LEDMJobStep.next(LEDMJobSnapshot(pageState: "CanceledByDevice")), .finished(.canceledByDevice))
+        XCTAssertEqual(LEDMJobStep.next(LEDMJobSnapshot(jobState: "Completed", pageState: "UploadCompleted")), .finished(.noDocument))
+        XCTAssertEqual(LEDMJobStep.next(LEDMJobSnapshot(jobState: "Canceled")), .finished(.canceledByDevice))
+    }
 }

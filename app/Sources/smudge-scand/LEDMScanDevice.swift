@@ -11,6 +11,8 @@ final class LEDMScanDevice: ScanDevice, @unchecked Sendable {
     let caps: LEDMScanCaps
     private let client: LEDMClient
     var log: (@Sendable (String) -> Void)?
+    /// Longest wait for a page to be ready before the job is canceled.
+    static let jobDeadline: TimeInterval = 15 * 60
 
     init(serial: String, caps: LEDMScanCaps) {
         self.serial = serial
@@ -54,32 +56,30 @@ final class LEDMScanDevice: ScanDevice, @unchecked Sendable {
             let jobURL = URLComponents(string: loc)?.path ?? loc
             lap("job \(jobURL)")
 
+            // Every way out except a finished job cancels it, or the printer keeps scanning on its own.
+            var ended = false
             func cancel() {
+                guard !ended else { return }
+                ended = true
                 _ = try? s.send(LEDMHTTP.scanCancelRequest(jobURL, xml: LEDMScanJob.cancelXML), expectRoot: nil, timeout: 10)
                 lap("cancel sent")
             }
+            defer { cancel() }
 
-            var snap = LEDMJobSnapshot()
-            while true {
+            var page = ""
+            var lastDoc = ""
+            poll: while true {
                 if isCancelled() { cancel(); return .canceledByClient }
+                if Date().timeIntervalSince(started) > Self.jobDeadline { cancel(); throw LEDMError.timeout }
                 let r = try s.send(LEDMHTTP.scanGetRequest(jobURL), expectRoot: nil, timeout: 15)
-                if r.status == 200 { log?(r.text) }
-                snap = LEDMJobSnapshot.parse(r.body)
-                if !snap.hasPreScanPage { return .noDocument }
-                switch snap.pageState {
-                case "CanceledByDevice": return .canceledByDevice
-                case "CanceledByClient": return .canceledByClient
-                case "ReadyToUpload": break
-                default:
-                    if snap.jobState == "Completed" { return .noDocument }
-                    if snap.jobState?.hasPrefix("Cancel") == true { return .canceledByDevice }
-                    Thread.sleep(forTimeInterval: 0.5)
-                    continue
+                if r.status == 200, r.text != lastDoc { lastDoc = r.text; log?(r.text) }
+                switch LEDMJobStep.next(LEDMJobSnapshot.parse(r.body)) {
+                case .wait: Thread.sleep(forTimeInterval: 0.5)
+                case .upload(let url): page = url; break poll
+                case .finished(let outcome): ended = true; return outcome
                 }
-                break
             }
             lap("ReadyToUpload")
-            guard let page = snap.binaryURL else { throw LEDMError.badReply("no BinaryURL") }
 
             FileManager.default.createFile(atPath: file.path, contents: nil)
             let fh = try FileHandle(forWritingTo: file)
@@ -87,6 +87,7 @@ final class LEDMScanDevice: ScanDevice, @unchecked Sendable {
             do {
                 let n = try s.download(LEDMHTTP.scanGetRequest(page), to: fh, idleTimeout: 120,
                                        progress: { _ in }, isCancelled: isCancelled)
+                ended = true
                 lap("downloaded \(n) bytes")
                 return .page(bytes: n)
             } catch LEDMError.canceled {

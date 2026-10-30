@@ -85,6 +85,29 @@ public struct LEDMJobSnapshot: Equatable, Sendable {
     }
 }
 
+/// What to do after one poll of a running LEDM scan job.
+public enum LEDMJobStep: Equatable, Sendable {
+    case wait
+    case upload(String)
+    case finished(ScanOutcome)
+
+    /// A job document without a page yet means the printer has not started, so keep polling.
+    /// The job only ends on a page or job state that says so.
+    public static func next(_ s: LEDMJobSnapshot) -> LEDMJobStep {
+        switch s.pageState {
+        case "CanceledByDevice": return .finished(.canceledByDevice)
+        case "CanceledByClient": return .finished(.canceledByClient)
+        case "ReadyToUpload": return s.binaryURL.map { .upload($0) } ?? .wait
+        default: break
+        }
+        switch s.jobState {
+        case "Completed": return .finished(.noDocument)
+        case "Canceled", "Aborted": return .finished(.canceledByDevice)
+        default: return .wait
+        }
+    }
+}
+
 public enum LEDMScanStatus {
     /// "Idle", "BusyWithScanJob" and so on, from /Scan/Status.
     public static func scannerState(_ xml: Data) -> String? {
