@@ -28,6 +28,7 @@ SPARKLE_FW="$ROOT/app/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos
 [ -d "$SPARKLE_FW" ] || { echo "missing $SPARKLE_FW" >&2; exit 1; }
 
 # The scanner agent ships next to the app bundle, not inside it. build-pkg.sh installs it.
+mkdir -p "$ROOT/build/app.noindex"
 cp "$BIN_DIR/smudge-scand" "$ROOT/build/app.noindex/smudge-scand"
 codesign -s - -f "$ROOT/build/app.noindex/smudge-scand"
 
