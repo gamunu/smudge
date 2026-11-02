@@ -3,6 +3,7 @@
 
 import XCTest
 @testable import Smudge
+@testable import SmudgeKit
 
 final class DeviceURITests: XCTestCase {
     func testSerialFromURI() {
@@ -252,5 +253,75 @@ final class SelectionTests: XCTestCase {
     func testModelNameDropsTheDriverMarker() {
         XCTAssertEqual(StatusStore.model(of: q("A", "HP DeskJet 2300 series, Smudge")), "HP DeskJet 2300 series")
         XCTAssertEqual(StatusStore.model(of: q("B", "", "usb://HP/ENVY%206000%20series?serial=Z")), "ENVY 6000 series")
+    }
+}
+
+final class ScanChannelTests: XCTestCase {
+    func testScanChannelMatchesCC0Only() {
+        let dev = USBDeviceInfo(vendor: 0x03f0, product: 0x3654, serial: "CN171232SB", interfaces: [
+            USBInterfaceInfo(number: 0, interfaceClass: 255, subclass: 0xcc, protocolCode: 0),
+            USBInterfaceInfo(number: 1, interfaceClass: 7, subclass: 1, protocolCode: 2),
+            USBInterfaceInfo(number: 2, interfaceClass: 255, subclass: 4, protocolCode: 1),
+            USBInterfaceInfo(number: 3, interfaceClass: 255, subclass: 4, protocolCode: 1),
+        ], registryID: 1)
+        XCTAssertEqual(LEDMMatch.interface(of: dev, channel: .scan)?.number, 0)
+        XCTAssertEqual(LEDMMatch.interface(of: dev, channel: .management)?.number, 2)
+        XCTAssertEqual(LEDMMatch.lookup(serial: "CN171232SB", in: [dev], channel: .scan), .found(dev, dev.interfaces[0]))
+    }
+}
+
+@MainActor
+final class ScannerStateTests: XCTestCase {
+    private func store() -> StatusStore {
+        let s = StatusStore()
+        s.status = PrinterStatus(name: "P", stateCode: 3, message: "", reasons: [], deviceURI: "usb://HP/X?serial=A",
+                                 makeAndModel: "HP X", ink: [], error: nil)
+        s.usbPresent = true
+        return s
+    }
+
+    func testResolve() {
+        XCTAssertEqual(ScannerState.resolve(hasInterface: false, sharing: true, activity: nil), .none)
+        XCTAssertEqual(ScannerState.resolve(hasInterface: false, sharing: true, activity: .scanning), .none)
+        XCTAssertEqual(ScannerState.resolve(hasInterface: true, sharing: false, activity: nil), .off)
+        XCTAssertEqual(ScannerState.resolve(hasInterface: true, sharing: true, activity: nil), .ready)
+        XCTAssertEqual(ScannerState.resolve(hasInterface: true, sharing: true, activity: .maintenance), .ready)
+        XCTAssertEqual(ScannerState.resolve(hasInterface: true, sharing: true, activity: .scanning), .scanning)
+    }
+
+    func testHealthScanningOutranksPrintingButNotAttention() {
+        let s = store()
+        s.jobs = [PrintJob(id: 1, title: "t", user: "u", sizeKB: 1, stateCode: 5, time: Date(), reasons: [])]
+        XCTAssertEqual(s.health, .printing)
+        s.scanner = .scanning
+        XCTAssertEqual(s.health, .scanning)
+        XCTAssertEqual(s.healthTitle, "Scanning")
+        s.status?.stateCode = 5          // stopped needs attention
+        XCTAssertEqual(s.health, .attention)
+    }
+
+    func testMaintenanceBlockedWhileScanning() {
+        let s = store()
+        XCTAssertNil(s.maintenanceBlockReason)
+        s.scanner = .scanning
+        XCTAssertEqual(s.maintenanceBlockReason, "The scanner is in use. Wait for the scan to finish.")
+    }
+
+    func testJobCardDoesNotCallAScanPrinting() {
+        let s = store()
+        XCTAssertEqual(s.idleJobText, "Nothing is printing.")
+        s.ledmCategories = ["processing"]
+        XCTAssertEqual(s.idleJobText, "The printer is working.")
+        s.scanner = .scanning
+        XCTAssertEqual(s.idleJobText, "Nothing is printing.")
+    }
+
+    func testScanChannelFromUSBDevices() {
+        let dev = USBDeviceInfo(vendor: 0x03f0, product: 0x3654, serial: "A", interfaces: [
+            USBInterfaceInfo(number: 0, interfaceClass: 255, subclass: 0xcc, protocolCode: 0),
+            USBInterfaceInfo(number: 2, interfaceClass: 255, subclass: 4, protocolCode: 1)], registryID: 1)
+        XCTAssertTrue(ScannerState.hasScanInterface(serial: "A", in: [dev]))
+        XCTAssertFalse(ScannerState.hasScanInterface(serial: "B", in: [dev]))
+        XCTAssertFalse(ScannerState.hasScanInterface(serial: nil, in: [dev, dev]))
     }
 }

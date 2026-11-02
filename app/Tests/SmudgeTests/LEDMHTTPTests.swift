@@ -3,6 +3,7 @@
 
 import XCTest
 @testable import Smudge
+@testable import SmudgeKit
 
 final class LEDMHTTPTests: XCTestCase {
     private let body = Fixture.calibrationState("CalibrationRequired")

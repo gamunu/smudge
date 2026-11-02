@@ -17,10 +17,30 @@ let package = Package(
             cSettings: [.unsafeFlags(["-Wno-deprecated-declarations"])],
             linkerSettings: [.linkedLibrary("cups")]
         ),
+        // USB and LEDM transport shared by the app and the scanner agent.
+        .target(
+            name: "SmudgeKit",
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [.linkedFramework("IOKit")]
+        ),
+        // eSCL and LEDM scan translation. No USB, so it tests without hardware.
+        .target(
+            name: "SmudgeScan",
+            dependencies: ["SmudgeKit"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Per-user agent that serves attached HP scanners to Image Capture over loopback eSCL.
+        .executableTarget(
+            name: "smudge-scand",
+            dependencies: ["SmudgeKit", "SmudgeScan"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         .executableTarget(
             name: "Smudge",
             dependencies: [
                 "CCups",
+                "SmudgeKit",
+                "SmudgeScan",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             swiftSettings: [
@@ -37,7 +57,12 @@ let package = Package(
         ),
         .testTarget(
             name: "SmudgeTests",
-            dependencies: ["Smudge"],
+            dependencies: ["Smudge", "SmudgeKit"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "SmudgeScanTests",
+            dependencies: ["SmudgeScan", "SmudgeKit"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

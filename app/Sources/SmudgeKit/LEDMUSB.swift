@@ -5,7 +5,7 @@ import Foundation
 import IOKit
 import IOUSBHost
 
-enum LEDMError: Error, LocalizedError {
+public enum LEDMError: Error, LocalizedError {
     case deviceNotFound
     case open(String)
     case io(String)
@@ -13,38 +13,42 @@ enum LEDMError: Error, LocalizedError {
     case noLEDM
     case badReply(String)
     case http(Int, String)
+    case canceled
 
-    var errorDescription: String? {
+    public static let noInterfaceReason = "This printer does not report ink levels over USB"
+
+    public var errorDescription: String? {
         switch self {
         case .deviceNotFound: return "Printer USB interface not found"
         case .open(let m): return "Cannot open printer USB interface: \(m)"
         case .io(let m): return "USB transfer failed: \(m)"
-        case .noLEDM: return LEDMSupport.noInkReason
+        case .noLEDM: return Self.noInterfaceReason
         case .timeout: return "Printer did not answer in time"
         case .badReply(let m): return "Unexpected printer reply: \(m)"
         case .http(let c, let m): return "Printer returned HTTP \(c) \(m)"
+        case .canceled: return "Canceled"
         }
     }
 }
 
-/// One claimed LEDM interface (vendor class 255, subclass 4, protocol 1).
+/// One claimed LEDM interface (management 255/4/1, or scan 255/0xcc/0).
 /// Uses IOUSBHost, so there is no libusb dependency. Not thread safe on its
 /// own: LEDMClient serializes access.
-final class LEDMUSBConnection {
+public final class LEDMUSBConnection {
     private let interface: IOUSBHostInterface
     private let outPipe: IOUSBHostPipe
     private let inPipe: IOUSBHostPipe
     private let maxPacket: Int
 
-    /// Opens the LEDM interface (255/4/1) of the HP device with this serial. Without a serial, the
+    /// Opens the LEDM interface of the HP device with this serial. Without a serial, the
     /// only attached HP device is used. Throws `.noLEDM` when the device has no such interface.
-    init(serial: String?) throws {
+    public init(serial: String?, channel: LEDMChannel = .management) throws {
         let scan = USBScan.scan()
         var keep: io_service_t = 0
         defer {
             for (_, byNumber) in scan.services { for (_, svc) in byNumber where svc != keep { IOObjectRelease(svc) } }
         }
-        switch LEDMMatch.lookup(serial: serial, in: scan.devices) {
+        switch LEDMMatch.lookup(serial: serial, in: scan.devices, channel: channel) {
         case .notConnected: throw LEDMError.deviceNotFound
         case .noLEDM: throw LEDMError.noLEDM
         case .found(let dev, let iface):
@@ -87,7 +91,7 @@ final class LEDMUSBConnection {
 
     deinit { interface.destroy() }
 
-    func write(_ data: Data, timeout: TimeInterval = 5) throws {
+    public func write(_ data: Data, timeout: TimeInterval = 5) throws {
         var offset = 0
         while offset < data.count {
             let n = min(16384, data.count - offset)
@@ -104,36 +108,39 @@ final class LEDMUSBConnection {
     }
 
     /// Reads one bulk transfer. Returns empty Data on timeout.
-    func read(timeout: TimeInterval) throws -> Data {
-        let size = 16384
-        let buf = NSMutableData(length: size)!
-        var got = 0
-        do {
-            try inPipe.__sendIORequest(with: buf, bytesTransferred: &got, completionTimeout: timeout)
-        } catch {
-            let ns = error as NSError
-            let code = UInt32(bitPattern: Int32(truncatingIfNeeded: ns.code))
-            // kIOReturnTimeout, kIOReturnAborted, kIOUSBTransactionTimeout
-            if code == 0xe00002d6 || code == 0xe00002eb || code == 0xe0004051 { return Data() }
-            throw LEDMError.io("\(error.localizedDescription) (\(ns.code))")
+    public func read(timeout: TimeInterval) throws -> Data {
+        // The transfer buffer is autoreleased. A pool per read keeps a long download from holding them all.
+        try autoreleasepool {
+            let size = 16384
+            let buf = NSMutableData(length: size)!
+            var got = 0
+            do {
+                try inPipe.__sendIORequest(with: buf, bytesTransferred: &got, completionTimeout: timeout)
+            } catch {
+                let ns = error as NSError
+                let code = UInt32(bitPattern: Int32(truncatingIfNeeded: ns.code))
+                // kIOReturnTimeout, kIOReturnAborted, kIOUSBTransactionTimeout
+                if code == 0xe00002d6 || code == 0xe00002eb || code == 0xe0004051 { return Data() }
+                throw LEDMError.io("\(error.localizedDescription) (\(ns.code))")
+            }
+            return Data(bytes: buf.bytes, count: got)
         }
-        return Data(bytes: buf.bytes, count: got)
     }
 
     /// Throws away anything the printer still has queued from earlier requests.
-    func drain(quiet: TimeInterval) {
+    public func drain(quiet: TimeInterval) {
         while let d = try? read(timeout: quiet), !d.isEmpty {}
     }
 }
 
 /// Reads the USB registry into plain values, keeping the interface services so one can be opened.
-enum USBScan {
-    static func prop(_ k: String, of s: io_service_t) -> Any? {
+public enum USBScan {
+    public static func prop(_ k: String, of s: io_service_t) -> Any? {
         IORegistryEntryCreateCFProperty(s, k as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
     }
 
     /// Every USB interface grouped by its device. The caller releases the services.
-    static func scan() -> (devices: [USBDeviceInfo], services: [UInt64: [Int: io_service_t]]) {
+    public static func scan() -> (devices: [USBDeviceInfo], services: [UInt64: [Int: io_service_t]]) {
         var iter: io_iterator_t = 0
         guard IOServiceGetMatchingServices(kIOMainPortDefault,
                                            IOServiceMatching("IOUSBHostInterface"), &iter) == KERN_SUCCESS
@@ -168,7 +175,7 @@ enum USBScan {
     }
 
     /// Plain snapshot of the attached USB devices.
-    static func devices() -> [USBDeviceInfo] {
+    public static func devices() -> [USBDeviceInfo] {
         let r = scan()
         for (_, m) in r.services { for (_, s) in m { IOObjectRelease(s) } }
         return r.devices

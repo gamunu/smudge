@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage("inkSeconds") private var inkSeconds = 60.0
     @AppStorage("pollSeconds") private var pollSeconds = 3.0
     @AppStorage("showMenuBar") private var showMenuBar = true
+    @AppStorage(ScannerState.sharingKey) private var scanSharing = true
 
     var body: some View {
         Form {
@@ -27,6 +28,16 @@ struct SettingsView: View {
                     Text("5 seconds").tag(5.0)
                     Text("10 seconds").tag(10.0)
                 }
+            }
+            Section("Scanner") {
+                Toggle("Make the scanner available to Image Capture and Preview", isOn: $scanSharing)
+                    .onChange(of: scanSharing) { _, _ in
+                        // The agent re-reads the setting when it hears this.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            DistributedNotificationCenter.default().postNotificationName(
+                                ScannerState.sharingChanged, object: nil, userInfo: nil, deliverImmediately: true)
+                        }
+                    }
             }
             Section("Menu bar") {
                 Toggle("Show in menu bar", isOn: $showMenuBar)

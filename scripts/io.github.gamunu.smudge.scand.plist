@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Gamunu Balagalla -->
+<!--
+  Per-user agent that makes an attached HP scanner available to Image Capture
+  and Preview. It listens on 127.0.0.1 only and announces itself on the
+  local-only Bonjour interface. It runs in every graphical login session, and
+  only the agent of the user at the console serves.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>io.github.gamunu.smudge.scand</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Printers/smudge/bin/smudge-scand</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/smudge-scand.log</string>
+</dict>
+</plist>

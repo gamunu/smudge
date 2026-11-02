@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import SwiftUI
+import AppKit
 
 struct OverviewView: View {
     @ObservedObject var store: StatusStore
@@ -17,6 +18,7 @@ struct OverviewView: View {
                     inkCard
                     jobCard
                 }
+                if store.scanner != .none { scannerCard }
                 actionsCard
             }
             .padding(Space.page)
@@ -121,12 +123,27 @@ struct OverviewView: View {
                 Spacer(minLength: 0)
                 Button("Cancel job") { store.cancel(j) }.secondaryAction()
             } else {
-                Text(store.isBusy ? "The printer is working." : "Nothing is printing.")
+                Text(store.idleJobText)
                     .font(TypeScale.secondary).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Button("Show job history") { goTo(.jobs) }.buttonStyle(.link)
             }
         }
+    }
+
+    private var scannerCard: some View {
+        Card(title: "Scanner") {
+            switch store.scanner {
+            case .scanning: Text("Scanning.").font(TypeScale.secondary).foregroundStyle(.secondary)
+            case .off: Text("Scanner sharing is off. Turn it on in Settings.").font(TypeScale.secondary).foregroundStyle(.secondary)
+            default: Text("Ready. Scan from Image Capture or Preview.").font(TypeScale.secondary).foregroundStyle(.secondary)
+            }
+            Button("Open Image Capture") {
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Image Capture.app"))
+            }
+            .secondaryAction()
+        }
+        .frame(maxHeight: 130)
     }
 
     private var actionsCard: some View {

@@ -2,56 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import Foundation
-
-// MARK: USB device model (pure, so it can be tested with fake devices)
-
-struct USBInterfaceInfo: Equatable, Sendable {
-    var number: Int
-    var interfaceClass: Int
-    var subclass: Int
-    var protocolCode: Int
-
-    /// The LEDM channel: vendor class 255, subclass 4, protocol 1.
-    var isLEDM: Bool { interfaceClass == 255 && subclass == 4 && protocolCode == 1 }
-}
-
-struct USBDeviceInfo: Equatable, Sendable {
-    var vendor: Int
-    var product: Int
-    var serial: String?
-    var interfaces: [USBInterfaceInfo]
-    var registryID: UInt64 = 0
-}
-
-enum LEDMLookup: Equatable, Sendable {
-    case notConnected
-    case noLEDM(USBDeviceInfo)
-    case found(USBDeviceInfo, USBInterfaceInfo)
-}
-
-enum LEDMMatch {
-    static let hpVendor = 0x03f0
-
-    /// The LEDM interface of a device, the lowest numbered one when there are several.
-    static func ledmInterface(of device: USBDeviceInfo) -> USBInterfaceInfo? {
-        device.interfaces.filter(\.isLEDM).min { $0.number < $1.number }
-    }
-
-    /// Picks the HP device that belongs to a queue. With a serial, only that device matches. Without
-    /// one, a lone HP device is taken, because with several there is no way to tell which is meant.
-    static func lookup(serial: String?, in devices: [USBDeviceInfo]) -> LEDMLookup {
-        let hp = devices.filter { $0.vendor == hpVendor }
-        let device: USBDeviceInfo?
-        if let serial, !serial.isEmpty {
-            device = hp.first { $0.serial == serial }
-        } else {
-            device = hp.count == 1 ? hp[0] : nil
-        }
-        guard let device else { return .notConnected }
-        guard let iface = ledmInterface(of: device) else { return .noLEDM(device) }
-        return .found(device, iface)
-    }
-}
+import SmudgeKit
 
 // MARK: device URI
 
@@ -132,7 +83,7 @@ enum LEDMSupport: Equatable, Sendable {
     case available
     case unavailable(String)
 
-    static let noInkReason = "This printer does not report ink levels over USB"
+    static let noInkReason = LEDMError.noInterfaceReason
 }
 
 // MARK: queue choice

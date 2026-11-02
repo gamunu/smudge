@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import Foundation
+import SmudgeKit
 import SwiftUI
 
 /// Where a guided maintenance flow is.
@@ -214,21 +215,34 @@ enum Maintenance {
 
 @MainActor
 final class MaintenanceController: ObservableObject {
-    @Published var job: MaintenanceJob?          // non-nil while the guided sheet is open
-    @Published var stage: FlowStage = .prepare
+    @Published var job: MaintenanceJob? { didSet { syncActivity() } }   // non-nil while the guided sheet is open
+    @Published var stage: FlowStage = .prepare { didSet { syncActivity() } }
     @Published var categories: [String] = []     // live ProductStatusDyn categories
     @Published var calState: String?             // live /Calibration/State, alignment only
     @Published var attention: Attention?
     @Published var reached = 0                   // index of the furthest step shown
     @Published var note: String?                 // extra line on the done screen
     @Published var caps: PrinterCaps?            // read once per printer, nil until then
-    @Published var cancelling = false            // a cancel request is in progress
+    @Published var cancelling = false { didSet { syncActivity() } }   // a cancel request is in progress
     @Published var cancelOutcome: String?        // result of the last cancel, shown for a while
 
     private var task: Task<Void, Never>?
     private var client: LEDMClient?
     private var capsInFlight = false
     private let pollInterval: Duration = .seconds(2)
+
+    private let activity = ActivityStore()
+    private var activityOn = false
+    private var activitySerial: String?
+
+    /// Tells the scanner agent while maintenance runs, so it refuses scans until the printer is free.
+    private func syncActivity() {
+        let on = isBusy
+        guard on != activityOn, let serial = activitySerial ?? client?.serial else { return }
+        activityOn = on
+        activitySerial = on ? serial : nil
+        activity.set(on ? .maintenance : nil, serial: serial, writer: .app)
+    }
 
     var isBusy: Bool {
         if cancelling { return true }
@@ -264,10 +278,11 @@ final class MaintenanceController: ObservableObject {
         guard client !== self.client else { return }
         task?.cancel()
         task = nil
-        self.client = client
-        caps = nil
         job = nil
         reset()
+        syncActivity()       // clears the entry for the old printer
+        self.client = client
+        caps = nil
     }
 
     func supports(_ job: MaintenanceJob) -> Bool { caps?.cards.contains(job) ?? false }
