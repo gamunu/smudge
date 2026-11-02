@@ -79,3 +79,8 @@ Local changes to upstream sources:
   int, so they cannot wrap before they are widened (CodeQL
   integer-multiplication-cast-to-long). Lidil.cpp also holds the swath
   buffer size in a size_t.
+- HPCupsFilter.cpp headerIsSane() limits PageSize to 200 inches, keeps
+  Margins and ImagingBoundingBox inside the page, and Lidil.cpp computes
+  its start offsets in long long. A box past the page edge wrapped the
+  unsigned printable offsets and overflowed Lidil's int math
+  (UndefinedBehaviorSanitizer, found by tests/fuzz).

@@ -182,12 +182,12 @@ DRIVER_ERROR Lidil::StartJob(SystemServices *pSystemServices, JobAttributes *pJA
         return UNSUPPORTED_PRINTMODE;
     }
 
-    m_iVertPosn = (m_pMA->printable_start_y * DEVUNITS_XBOW) / m_pQA->vertical_resolution;
-    m_iLeftMargin = (m_pMA->printable_start_x * DEVUNITS_XBOW) / m_pQA->vertical_resolution;
+    m_iVertPosn = (int) (((long long) m_pMA->printable_start_y * DEVUNITS_XBOW) / m_pQA->vertical_resolution);
+    m_iLeftMargin = (int) (((long long) m_pMA->printable_start_x * DEVUNITS_XBOW) / m_pQA->vertical_resolution);
     if (m_pJA->print_borderless)
     {
-        m_iVertPosn = (-m_pMA->vertical_overspray * DEVUNITS_XBOW) / (2 * m_pQA->vertical_resolution);
-        m_iLeftMargin = (-m_pMA->horizontal_overspray * DEVUNITS_XBOW) / (2 * m_pQA->horizontal_resolution);
+        m_iVertPosn = (int) ((-(long long) m_pMA->vertical_overspray * DEVUNITS_XBOW) / (2 * m_pQA->vertical_resolution));
+        m_iLeftMargin = (int) ((-(long long) m_pMA->horizontal_overspray * DEVUNITS_XBOW) / (2 * m_pQA->horizontal_resolution));
     }
 
     err = allocateSwathBuffers();
