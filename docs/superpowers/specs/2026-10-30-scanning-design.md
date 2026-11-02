@@ -196,6 +196,11 @@ page on the glass:
   reply's `Content-Type` (an honest `image/tiff` changed nothing).
   Image Capture and Preview's Import from Scanner both save real JPEGs,
   and requests for PNG are converted.
+- **Unplug and replug.** With the device-level removal watcher, an
+  unplugged printer leaves Image Capture at once and is served again
+  about 3 s after it is plugged back in. A loose cable produced dozens
+  of "hardware connection lost" drops at the USB hub, idle and during
+  scans; the agent followed every one, and a new cable ended them.
 
 ## Goals
 
