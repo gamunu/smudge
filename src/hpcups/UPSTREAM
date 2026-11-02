@@ -60,3 +60,9 @@ Local changes to upstream sources:
   that the hbpl1 printable area fits the page and the read buffer, and
   stops the job when cupsRasterReadPixels() runs out of data. Found by
   tests/fuzz; upstream trusted every header field.
+- Hbpl1.cpp maps a cupsInteger5 colour theme outside NONE to VIVIDSRGB
+  to NONE instead of casting it to the COLORTHEME enum (UndefinedBehavior
+  Sanitizer, found by tests/fuzz).
+- Compressor.cpp starts compressBuf at NULL. ModeJbig allocates it only in
+  Init(), so a job that failed before Init() finished had the destructor
+  delete an uninitialized pointer (AddressSanitizer, found by tests/fuzz).
