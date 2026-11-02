@@ -1,6 +1,6 @@
 # Scanning through Image Capture
 
-Status: design, not built. Date: 2026-10-30.
+Status: built and tested on a DeskJet Ink Advantage 2336. Date: 2026-10-30, updated 2026-11-02.
 
 ## Why
 
