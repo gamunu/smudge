@@ -198,47 +198,51 @@ public final class LEDMSession {
         var last = Date()
         while !finished {
             if isCancelled() { throw LEDMError.canceled }
-            let got = try conn.read(timeout: 1.0)
-            if got.isEmpty {
-                if Date().timeIntervalSince(last) > idleTimeout { throw LEDMError.timeout }
-                continue
-            }
-            last = Date()
-            var payload = got
-            if !headDone {
-                head.append(got)
-                payload = Data()
-                while !headDone, let h = LEDMHTTP.parseHead(head) {
-                    let rest = Data(head.dropFirst(h.bodyStart))
-                    head = rest
-                    if h.status < 0 || h.status == 100 { continue }
-                    if h.status == 400, !skipped400 { skipped400 = true; continue }
-                    guard h.status == 200 else { throw LEDMError.http(h.status, h.reason) }
-                    log?("<< \(h.status) \(h.reason) \(h.headers["transfer-encoding"] ?? h.headers["content-length"] ?? "")")
-                    headDone = true
-                    chunked = (h.headers["transfer-encoding"] ?? "").lowercased().contains("chunked")
-                    remaining = h.headers["content-length"].flatMap { Int($0) }
-                    payload = rest
-                    head = Data()
+            // Each read hands back autoreleased buffers. A page runs to hundreds of MB, so without a pool
+            // per pass they pile up until the loop returns.
+            try autoreleasepool {
+                let got = try conn.read(timeout: 1.0)
+                if got.isEmpty {
+                    if Date().timeIntervalSince(last) > idleTimeout { throw LEDMError.timeout }
+                    return
                 }
-                if !headDone { continue }
-            }
-            let body: Data
-            if chunked {
-                let r = try decoder.feed(payload)
-                body = r.body
-                finished = r.done
-            } else if let rem = remaining {
-                body = payload.prefix(rem)
-                remaining = rem - body.count
-                finished = remaining == 0
-            } else {
-                throw LEDMError.badReply("page reply has no length")
-            }
-            if !body.isEmpty {
-                try file.write(contentsOf: body)
-                written += body.count
-                progress(written)
+                last = Date()
+                var payload = got
+                if !headDone {
+                    head.append(got)
+                    payload = Data()
+                    while !headDone, let h = LEDMHTTP.parseHead(head) {
+                        let rest = Data(head.dropFirst(h.bodyStart))
+                        head = rest
+                        if h.status < 0 || h.status == 100 { continue }
+                        if h.status == 400, !skipped400 { skipped400 = true; continue }
+                        guard h.status == 200 else { throw LEDMError.http(h.status, h.reason) }
+                        log?("<< \(h.status) \(h.reason) \(h.headers["transfer-encoding"] ?? h.headers["content-length"] ?? "")")
+                        headDone = true
+                        chunked = (h.headers["transfer-encoding"] ?? "").lowercased().contains("chunked")
+                        remaining = h.headers["content-length"].flatMap { Int($0) }
+                        payload = rest
+                        head = Data()
+                    }
+                    if !headDone { return }
+                }
+                let body: Data
+                if chunked {
+                    let r = try decoder.feed(payload)
+                    body = r.body
+                    finished = r.done
+                } else if let rem = remaining {
+                    body = payload.prefix(rem)
+                    remaining = rem - body.count
+                    finished = remaining == 0
+                } else {
+                    throw LEDMError.badReply("page reply has no length")
+                }
+                if !body.isEmpty {
+                    try file.write(contentsOf: body)
+                    written += body.count
+                    progress(written)
+                }
             }
         }
         log?("<< body \(written) bytes")

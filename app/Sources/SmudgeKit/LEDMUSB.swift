@@ -109,19 +109,22 @@ public final class LEDMUSBConnection {
 
     /// Reads one bulk transfer. Returns empty Data on timeout.
     public func read(timeout: TimeInterval) throws -> Data {
-        let size = 16384
-        let buf = NSMutableData(length: size)!
-        var got = 0
-        do {
-            try inPipe.__sendIORequest(with: buf, bytesTransferred: &got, completionTimeout: timeout)
-        } catch {
-            let ns = error as NSError
-            let code = UInt32(bitPattern: Int32(truncatingIfNeeded: ns.code))
-            // kIOReturnTimeout, kIOReturnAborted, kIOUSBTransactionTimeout
-            if code == 0xe00002d6 || code == 0xe00002eb || code == 0xe0004051 { return Data() }
-            throw LEDMError.io("\(error.localizedDescription) (\(ns.code))")
+        // The transfer buffer is autoreleased. A pool per read keeps a long download from holding them all.
+        try autoreleasepool {
+            let size = 16384
+            let buf = NSMutableData(length: size)!
+            var got = 0
+            do {
+                try inPipe.__sendIORequest(with: buf, bytesTransferred: &got, completionTimeout: timeout)
+            } catch {
+                let ns = error as NSError
+                let code = UInt32(bitPattern: Int32(truncatingIfNeeded: ns.code))
+                // kIOReturnTimeout, kIOReturnAborted, kIOUSBTransactionTimeout
+                if code == 0xe00002d6 || code == 0xe00002eb || code == 0xe0004051 { return Data() }
+                throw LEDMError.io("\(error.localizedDescription) (\(ns.code))")
+            }
+            return Data(bytes: buf.bytes, count: got)
         }
-        return Data(bytes: buf.bytes, count: got)
     }
 
     /// Throws away anything the printer still has queued from earlier requests.
