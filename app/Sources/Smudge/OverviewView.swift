@@ -123,7 +123,7 @@ struct OverviewView: View {
                 Spacer(minLength: 0)
                 Button("Cancel job") { store.cancel(j) }.secondaryAction()
             } else {
-                Text(store.isBusy ? "The printer is working." : "Nothing is printing.")
+                Text(store.idleJobText)
                     .font(TypeScale.secondary).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Button("Show job history") { goTo(.jobs) }.buttonStyle(.link)

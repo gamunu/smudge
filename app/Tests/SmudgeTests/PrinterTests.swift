@@ -307,6 +307,15 @@ final class ScannerStateTests: XCTestCase {
         XCTAssertEqual(s.maintenanceBlockReason, "The scanner is in use. Wait for the scan to finish.")
     }
 
+    func testJobCardDoesNotCallAScanPrinting() {
+        let s = store()
+        XCTAssertEqual(s.idleJobText, "Nothing is printing.")
+        s.ledmCategories = ["processing"]
+        XCTAssertEqual(s.idleJobText, "The printer is working.")
+        s.scanner = .scanning
+        XCTAssertEqual(s.idleJobText, "Nothing is printing.")
+    }
+
     func testScanChannelFromUSBDevices() {
         let dev = USBDeviceInfo(vendor: 0x03f0, product: 0x3654, serial: "A", interfaces: [
             USBInterfaceInfo(number: 0, interfaceClass: 255, subclass: 0xcc, protocolCode: 0),

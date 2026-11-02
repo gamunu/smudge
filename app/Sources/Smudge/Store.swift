@@ -176,6 +176,12 @@ final class StatusStore: ObservableObject {
 
     var activeJob: PrintJob? { jobs.first(where: \.isActive) }
 
+    /// The job card's line when no print job is active. The printer reports itself busy while it
+    /// scans, and that is not printing.
+    var idleJobText: String {
+        isBusy && scanner != .scanning ? "The printer is working." : "Nothing is printing."
+    }
+
     /// The one busy rule. Busy means CUPS has an active job (pending, held, processing) or the
     /// printer itself reports processing or calibrating. The CUPS printer-state alone does not
     /// count: it can stay at "processing" after the job is gone.
