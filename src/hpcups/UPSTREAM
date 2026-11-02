@@ -66,3 +66,21 @@ Local changes to upstream sources:
 - Compressor.cpp starts compressBuf at NULL. ModeJbig allocates it only in
   Init(), so a job that failed before Init() finished had the destructor
   delete an uninitialized pointer (AddressSanitizer, found by tests/fuzz).
+- Mode10.cpp compares curPixel against replacementCount instead of testing
+  their unsigned difference against zero (CodeQL
+  unsigned-difference-expression-compared-zero). Same result, since the
+  count never exceeds curPixel.
+- HPCupsFilter.cpp casts the milliseconds value to long for its %ld
+  conversion, and headerIsSane() rejects a cupsHeight above
+  MAX_RASTER_HEIGHT (240000, 1200 dpi * 200 inches).
+- genPCLm.cpp, genJPEGStrips.cpp, Lidil.cpp, ErnieFilter.cpp,
+  ColorMatcher.cpp, ModeJpeg.cpp and ModeJbig.cpp compute buffer size
+  products (malloc, new, memset, memcpy, zlib length) in size_t instead of
+  int, so they cannot wrap before they are widened (CodeQL
+  integer-multiplication-cast-to-long). Lidil.cpp also holds the swath
+  buffer size in a size_t.
+- HPCupsFilter.cpp headerIsSane() limits PageSize to 200 inches, keeps
+  Margins and ImagingBoundingBox inside the page, and Lidil.cpp computes
+  its start offsets in long long. A box past the page edge wrapped the
+  unsigned printable offsets and overflowed Lidil's int math
+  (UndefinedBehaviorSanitizer, found by tests/fuzz).

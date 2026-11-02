@@ -44,6 +44,8 @@
 #include "hplip_utils.h"
 
 #define MAX_RASTER_WIDTH 131072
+#define MAX_RASTER_HEIGHT 240000   // 1200 dpi * 200 inches
+#define MAX_PAGE_POINTS   14400    // 200 inches
 
 #define HP_FILE_VERSION_STR    "03.09.08.0"
 
@@ -572,7 +574,7 @@ int HPCupsFilter::StartPrintJob(int  argc, char *argv[])
     t = localtime(&long_time);
     gettimeofday(&tv, NULL);
     strncpy(m_JA.job_start_time, asctime(t), sizeof(m_JA.job_start_time)-1);    // returns Fri Jun  5 08:12:16 2009
-    snprintf(m_JA.job_start_time+19, sizeof(m_JA.job_start_time) - 20, ":%ld %d", tv.tv_usec/1000, t->tm_year + 1900); // add milliseconds
+    snprintf(m_JA.job_start_time+19, sizeof(m_JA.job_start_time) - 20, ":%ld %d", (long) (tv.tv_usec/1000), t->tm_year + 1900); // add milliseconds
 
 #ifdef UNITTESTING
     memset(m_JA.job_start_time,0,sizeof(m_JA.job_start_time));
@@ -725,21 +727,25 @@ static bool headerIsSane(const cups_page_header2_t *h, const cups_page_header2_t
         !enumAtMost(&h->cupsColorOrder, 2)) {
         return false;
     }
-    if (h->cupsWidth == 0 || h->cupsWidth > MAX_RASTER_WIDTH) {
+    if (h->cupsWidth == 0 || h->cupsWidth > MAX_RASTER_WIDTH ||
+        h->cupsHeight > MAX_RASTER_HEIGHT) {
         return false;
     }
     // These are scaled by the resolution and stored in ints.
     for (int i = 0; i < 2; i++) {
         if (h->HWResolution[i] == 0 || h->HWResolution[i] > 9600 ||
-            h->PageSize[i] > 65535 || h->Margins[i] > 65535 ||
+            h->PageSize[i] > MAX_PAGE_POINTS || h->Margins[i] > h->PageSize[i] ||
             !(fabsf(h->cupsReal[i]) <= 1000.0f)) {
             return false;
         }
     }
-    for (int i = 0; i < 4; i++) {
-        if (h->ImagingBoundingBox[i] > 65535) {
-            return false;
-        }
+    // The printable offsets are PageSize minus the box, in unsigned math.
+    // A box outside the page would wrap them to huge values.
+    if (h->ImagingBoundingBox[0] > h->ImagingBoundingBox[2] ||
+        h->ImagingBoundingBox[1] > h->ImagingBoundingBox[3] ||
+        h->ImagingBoundingBox[2] > h->PageSize[0] ||
+        h->ImagingBoundingBox[3] > h->PageSize[1]) {
+        return false;
     }
     if (h->cupsBitsPerColor == 0 || h->cupsBitsPerColor > 8 ||
         h->cupsBitsPerPixel == 0 || h->cupsBitsPerPixel > 32) {

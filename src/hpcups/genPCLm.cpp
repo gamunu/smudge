@@ -204,8 +204,8 @@ ubyte *shiftStripByLeftMargin(ubyte *ptrToStrip,sint32 currSourceWidth,sint32 cu
 	{
 		scanLineWidth=currMediaWidth;
 		// Allocate a full strip
-		newStrip=(ubyte*)malloc(scanLineWidth*currStripHeight);
-		memset(newStrip,0xff,scanLineWidth*currStripHeight);
+		newStrip=(ubyte*)malloc((size_t)scanLineWidth*currStripHeight);
+		memset(newStrip,0xff,(size_t)scanLineWidth*currStripHeight);
 
 		for(int i=0;i<numLinesThisCall;i++)
 		{
@@ -220,8 +220,8 @@ ubyte *shiftStripByLeftMargin(ubyte *ptrToStrip,sint32 currSourceWidth,sint32 cu
 		scanLineWidth=currMediaWidth*3;
 		sint32 srcScanlineWidth=currSourceWidth*3;
 		sint32 shiftAmount=leftMargin*3;
-		newStrip=(ubyte*)malloc(scanLineWidth*currStripHeight);
-		memset(newStrip,0xff,scanLineWidth*currStripHeight);
+		newStrip=(ubyte*)malloc((size_t)scanLineWidth*currStripHeight);
+		memset(newStrip,0xff,(size_t)scanLineWidth*currStripHeight);
 		for(int i=0;i<numLinesThisCall;i++)
 		{
 			toPtr=newStrip+shiftAmount+(i*scanLineWidth);
@@ -1738,7 +1738,7 @@ int  PCLmGenerator::StartPage(PCLmPageSetup *PCLmPageContent, void **pOutBuffer,
 	{
 		// We need to pad the scratchBuffer size to allow for compression expansion (RLE can create
 		// compressed segments that are slightly larger than the source.
-		scratchBuffer=(ubyte*)malloc(currStripHeight*mediaWidthInPixels*srcNumComponents*2);
+		scratchBuffer=(ubyte*)malloc((size_t)currStripHeight*mediaWidthInPixels*srcNumComponents*2);
 		if(!scratchBuffer)
 			return(errorOutAndCleanUp());
 		/*if(DebugIt2)
@@ -1919,8 +1919,8 @@ int  PCLmGenerator::Encapsulate(void *pInBuffer, int inBufferSize, int thisHeigh
 		{
 			ubyte whitePt=0xff;
 
-			ubyte *tmpStrip=(ubyte*)malloc(scanlineWidth*topMarginInPix);
-			memset(tmpStrip,whitePt,scanlineWidth*topMarginInPix);
+			ubyte *tmpStrip=(ubyte*)malloc((size_t)scanlineWidth*topMarginInPix);
+			memset(tmpStrip,whitePt,(size_t)scanlineWidth*topMarginInPix);
 
 
 			for(sint32 stripCntr=0; stripCntr<numFullInjectedStrips;stripCntr++)
@@ -1993,18 +1993,18 @@ int  PCLmGenerator::Encapsulate(void *pInBuffer, int inBufferSize, int thisHeigh
 			ubyte whitePt=0xff;
 
 			// We need to inject a blank image-strip with a height==topMarginInPix
-			ubyte *tmpStrip=(ubyte*)malloc(scanlineWidth*topMarginInPix);
+			ubyte *tmpStrip=(ubyte*)malloc((size_t)scanlineWidth*topMarginInPix);
 			uLongf tmpDestSize=destSize;
-			memset(tmpStrip,whitePt,scanlineWidth*topMarginInPix);
+			memset(tmpStrip,whitePt,(size_t)scanlineWidth*topMarginInPix);
 
 			for(sint32 stripCntr=0; stripCntr<numFullInjectedStrips;stripCntr++)
 			{
-				result=compress((Bytef*)scratchBuffer,&tmpDestSize, (const Bytef*)tmpStrip, scanlineWidth*numFullScanlinesToInject);
+				result=compress((Bytef*)scratchBuffer,&tmpDestSize, (const Bytef*)tmpStrip, (uLong)scanlineWidth*numFullScanlinesToInject);
 				injectLZStrip((ubyte*)scratchBuffer, tmpDestSize, mediaWidthInPixels, numFullScanlinesToInject, destColorSpace, true /*white*/ );
 			}
 			if(numPartialScanlinesToInject)
 			{
-				result=compress((Bytef*)scratchBuffer,&tmpDestSize, (const Bytef*)tmpStrip, scanlineWidth*numPartialScanlinesToInject);
+				result=compress((Bytef*)scratchBuffer,&tmpDestSize, (const Bytef*)tmpStrip, (uLong)scanlineWidth*numPartialScanlinesToInject);
 				injectLZStrip((ubyte*)scratchBuffer, tmpDestSize, mediaWidthInPixels, numPartialScanlinesToInject, destColorSpace, true /*white*/ );
 			}
 			free(tmpStrip);
@@ -2013,7 +2013,7 @@ int  PCLmGenerator::Encapsulate(void *pInBuffer, int inBufferSize, int thisHeigh
 
 		if(newStripPtr)
 		{
-        result=compress((Bytef*)scratchBuffer,&destSize,(const Bytef*)newStripPtr,scanlineWidth*numLinesThisCall);
+        result=compress((Bytef*)scratchBuffer,&destSize,(const Bytef*)newStripPtr,(uLong)scanlineWidth*numLinesThisCall);
         if(DebugIt2)
           writeOutputFile(destSize, scratchBuffer, m_pPCLmSSettings->user_name);
         if(DebugIt2)
@@ -2026,7 +2026,7 @@ int  PCLmGenerator::Encapsulate(void *pInBuffer, int inBufferSize, int thisHeigh
 		}
 		else
       {
-        result=compress((Bytef*)scratchBuffer, &destSize, (const Bytef*)localInBuffer, scanlineWidth*numLinesThisCall);
+        result=compress((Bytef*)scratchBuffer, &destSize, (const Bytef*)localInBuffer, (uLong)scanlineWidth*numLinesThisCall);
         if(DebugIt2)
           writeOutputFile(destSize, scratchBuffer, m_pPCLmSSettings->user_name);
         if(DebugIt2)
@@ -2046,8 +2046,8 @@ int  PCLmGenerator::Encapsulate(void *pInBuffer, int inBufferSize, int thisHeigh
 
 			// We need to inject a blank image-strip with a height==topMarginInPix
 
-			ubyte *tmpStrip=(ubyte*)malloc(scanlineWidth*topMarginInPix);
-			memset(tmpStrip,whitePt,scanlineWidth*topMarginInPix);
+			ubyte *tmpStrip=(ubyte*)malloc((size_t)scanlineWidth*topMarginInPix);
+			memset(tmpStrip,whitePt,(size_t)scanlineWidth*topMarginInPix);
 
 			for(sint32 stripCntr=0; stripCntr<numFullInjectedStrips;stripCntr++)
 			{

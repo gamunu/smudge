@@ -237,7 +237,7 @@ This function compresses a single row per call.
                 {
                     pixelSource = eeNEPixel;
                 }
-                else if ((curPixel-replacementCount > 0) &&
+                else if ((curPixel > (unsigned int) replacementCount) &&
                          (getPixel (curRowPtr, curPixel-replacementCount - 1) == RLERun))
                 {
                     pixelSource = eeWPixel;

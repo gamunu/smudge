@@ -271,7 +271,7 @@ void ModeJpeg::compress ()
     }
     m_iRowNumber = 0;
     iRastersReady = 1;
-    memset(m_pbyInputBuffer, 0xFF, m_iRowWidth * m_iBandHeight);
+    memset(m_pbyInputBuffer, 0xFF, (size_t)m_iRowWidth * m_iBandHeight);
 }
 
 void ModeJpeg::jpegCompressForQuickConnect()

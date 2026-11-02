@@ -163,7 +163,7 @@ write_JPEG_Buff (ubyte * buffPtr, int quality, int image_width, int image_height
   dmgr.empty_output_buffer = empty_buffer;
   dmgr.term_destination    = term_buffer;
   dmgr.next_output_byte    = (JOCTET *)buffPtr;
-  dmgr.free_in_buffer      = image_width * image_height * 3;
+  dmgr.free_in_buffer      = (size_t)image_width * image_height * 3;
 
   /* Step 1: allocate and initialize JPEG compression object */
 

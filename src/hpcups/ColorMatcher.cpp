@@ -86,7 +86,7 @@ ColorMatcher::~ColorMatcher()
 void ColorMatcher::Restart()
 // also reset cache when we have one
 {
-    memset(Contone, 0, InputWidth*ColorPlaneCount + 8);
+    memset(Contone, 0, (size_t)InputWidth*ColorPlaneCount + 8);
 
     started = false;
 }
