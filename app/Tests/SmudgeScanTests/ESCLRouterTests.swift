@@ -36,9 +36,9 @@ final class FakeScanDevice: ScanDevice, @unchecked Sendable {
     func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool) throws -> ScanOutcome {
         lock.lock(); scans += 1; lock.unlock()
         if let pieces {
-            FileManager.default.createFile(atPath: file.path, contents: nil)
-            let fh = try FileHandle(forWritingTo: file)
-            defer { try? fh.close() }
+            // Like the printer, the page file only appears once the first data is ready.
+            var fh: FileHandle?
+            defer { try? fh?.close() }
             for piece in pieces {
                 while stepGate.wait(timeout: .now() + 0.01) == .timedOut {
                     if isCancelled() {
@@ -46,7 +46,11 @@ final class FakeScanDevice: ScanDevice, @unchecked Sendable {
                         return .canceledByClient
                     }
                 }
-                try fh.write(contentsOf: piece)
+                if fh == nil {
+                    FileManager.default.createFile(atPath: file.path, contents: nil)
+                    fh = try FileHandle(forWritingTo: file)
+                }
+                try fh?.write(contentsOf: piece)
             }
             return .page(bytes: pieces.reduce(0) { $0 + $1.count })
         }
@@ -74,10 +78,11 @@ final class FakeScanDevice: ScanDevice, @unchecked Sendable {
 }
 
 final class ESCLRouterTests: XCTestCase {
-    private func makeRouter(blocked: @escaping @Sendable () -> Bool = { false }, pageWait: TimeInterval = 20) throws -> (ESCLRouter, FakeScanDevice) {
+    private func makeRouter(blocked: @escaping @Sendable () -> Bool = { false }, pageWait: TimeInterval = 20,
+                            dir: URL? = nil) throws -> (ESCLRouter, FakeScanDevice) {
         let caps = try XCTUnwrap(LEDMScanCaps.parse(Data(ScanFixtures.scanCaps2336.utf8)))
         let dev = FakeScanDevice(caps: caps)
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-" + UUID().uuidString)
+        let dir = dir ?? FileManager.default.temporaryDirectory.appendingPathComponent("router-" + UUID().uuidString)
         let r = ESCLRouter(device: dev, name: "DeskJet 2300", uuid: UUID(), serial: "CN171232SB", tone: .deskJet2300,
                            workDir: dir, onActivity: { _ in }, blocked: blocked, pageWait: pageWait)
         return (r, dev)
@@ -146,6 +151,34 @@ final class ESCLRouterTests: XCTestCase {
         XCTAssertEqual(s.next(), .end)
         XCTAssertEqual(got, pieces.reduce(Data(), +))
         XCTAssertEqual(get(r, "/eSCL/ScanJobs/1/NextDocument").status, 404)
+    }
+
+    func testStreamNeverReadsAPageLeftByAnEarlierRun() throws {
+        // Job ids start at 1 in every agent run, and finished pages stay in the work folder.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-" + UUID().uuidString)
+        let (old, oldDev) = try makeRouter(dir: dir)
+        oldDev.pieces = [Data(repeating: 0xEE, count: 5000)]
+        _ = post(old)
+        let first = try XCTUnwrap(stream(get(old, "/eSCL/ScanJobs/1/NextDocument")))
+        oldDev.step(); old.waitUntilIdle()
+        while case .data = first.next() {}
+
+        let (r, dev) = try makeRouter(dir: dir)
+        let fresh = Data(repeating: 0x11, count: 300)
+        dev.pieces = [fresh]
+        _ = post(r)
+        let s = try XCTUnwrap(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
+        // Start reading before the printer has sent anything, as Image Capture does.
+        let got = Box()
+        let done = expectation(description: "stream read")
+        DispatchQueue.global().async {
+            while case .data(let d) = s.next() { got.append(d) }
+            done.fulfill()
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        dev.step(); r.waitUntilIdle()
+        wait(for: [done], timeout: 5)
+        XCTAssertEqual(got.data, fresh)
     }
 
     func testSecondNextDocumentWhileStreamingIs503() throws {
@@ -273,4 +306,11 @@ final class ESCLRouterTests: XCTestCase {
         r.expireFinishedJobs(olderThan: 0)
         XCTAssertFalse(text(get(r, "/eSCL/ScannerStatus")).contains("/eSCL/ScanJobs/1"))
     }
+}
+
+private final class Box: @unchecked Sendable {
+    private let lock = NSLock()
+    private var d = Data()
+    var data: Data { lock.lock(); defer { lock.unlock() }; return d }
+    func append(_ x: Data) { lock.lock(); d.append(x); lock.unlock() }
 }

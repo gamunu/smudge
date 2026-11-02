@@ -27,6 +27,8 @@ public struct RouterResponse {
 public final class ESCLRouter: @unchecked Sendable {
     /// How long a finished job stays in the status list (the spec leaves this open).
     public static let finishedJobLifetime: TimeInterval = 300
+    /// Age after which a page file in the work folder counts as left over from an earlier run.
+    static let staleFileAge: TimeInterval = 60 * 60
     /// The scanner state is read at most this often while no job runs.
     static let stateCacheSeconds: TimeInterval = 3
 
@@ -60,6 +62,24 @@ public final class ESCLRouter: @unchecked Sendable {
         self.blocked = blocked
         self.pageWait = pageWait
         try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+        removeStaleFiles()
+    }
+
+    /// Job ids start at 1 in every run, so files are named by the job's UUID. A stream then can
+    /// only ever read the page its own job writes, never one an earlier run left behind.
+    private func pageFile(_ job: ScanJobRecord) -> URL {
+        workDir.appendingPathComponent("job-\(job.uuid.uuidString).page")
+    }
+
+    /// Drops pages earlier runs left behind. Recent files may belong to another running agent.
+    private func removeStaleFiles() {
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-Self.staleFileAge)
+        let files = (try? fm.contentsOfDirectory(at: workDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for f in files where f.lastPathComponent.hasPrefix("job-") {
+            let modified = (try? f.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if modified < cutoff { try? fm.removeItem(at: f) }
+        }
     }
 
     // MARK: routes
@@ -167,8 +187,8 @@ public final class ESCLRouter: @unchecked Sendable {
     }
 
     private func run(_ job: ScanJobRecord) {
-        let raw = workDir.appendingPathComponent("job-\(job.id).page")
-        let out = workDir.appendingPathComponent("job-\(job.id).out")
+        let raw = pageFile(job)
+        let out = workDir.appendingPathComponent("job-\(job.uuid.uuidString).out")
         var result: PageResult = .failed
         var state = ESCLJobInfo.State.aborted
         var completed = 0
@@ -227,7 +247,7 @@ public final class ESCLRouter: @unchecked Sendable {
         if passthrough, job.waiter.current == nil {
             job.nextDocumentServed = true
             lock.unlock()
-            return RouterResponse(status: 200, body: .stream(PageStream(file: workDir.appendingPathComponent("job-\(job.id).page"),
+            return RouterResponse(status: 200, body: .stream(PageStream(file: pageFile(job),
                                                                        contentType: job.plan.output.rawValue, waiter: job.waiter)))
         }
         lock.unlock()
