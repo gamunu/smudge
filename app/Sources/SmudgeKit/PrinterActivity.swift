@@ -10,7 +10,7 @@ public enum PrinterActivity: String, Codable, Sendable {
 
 /// One small file per writer and printer serial. The agent writes "scanning", the app writes
 /// "maintenance". An entry whose pid is gone counts as nothing.
-public struct ActivityStore {
+public struct ActivityStore: Sendable {
     public enum Writer: String, Sendable { case app, scand }
 
     private struct Entry: Codable {

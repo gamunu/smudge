@@ -3,7 +3,7 @@
 
 import Foundation
 
-public struct LEDMResponse {
+public struct LEDMResponse: Sendable {
     public var status: Int
     public var reason: String
     public var headers: [String: String]   // lower-cased names
@@ -183,9 +183,15 @@ public enum LEDMHTTP {
 /// that answers the request. Junk, 100 Continue and late replies to earlier
 /// requests (wrong XML root) are dropped.
 public struct LEDMReplyReader {
+    /// Most bytes held while waiting for a reply to complete. LEDM XML is a few KB, so a reply that
+    /// outgrows this is a stuck or hostile device.
+    public static let maxBuffer = 1 << 20
+
     public var buffer = Data()
     public let expectRoot: String?
     public var log: ((String) -> Void)?
+    /// True once the buffer passed `maxBuffer`. The buffer is dropped and the caller should give up.
+    public private(set) var overflowed = false
 
     public init(expectRoot: String?, log: ((String) -> Void)? = nil) {
         self.expectRoot = expectRoot
@@ -206,6 +212,7 @@ public struct LEDMReplyReader {
             }
             return resp
         }
+        if buffer.count > Self.maxBuffer { buffer = Data(); overflowed = true }
         return nil
     }
 }
