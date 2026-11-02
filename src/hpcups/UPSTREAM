@@ -33,7 +33,8 @@ Local changes to upstream sources:
   stack garbage (UndefinedBehaviorSanitizer, found by tests/fuzz).
 - Mode9.cpp and Mode3.cpp test the byte count before reading the next byte
   in their run scans, so the last byte of a row no longer reads one past the
-  row buffer (AddressSanitizer, found by make asan).
+  row buffer (AddressSanitizer, found by make asan). Mode3.cpp counts the
+  run in an unsigned int instead of a BYTE, so the loop compares like types.
 - Mode10.cpp does the short-delta shift on unsigned values, and keeps the
   end-of-row sentinel to 24 bits so it cannot equal its neighbour and run
   the pixel scans off the row (UndefinedBehaviorSanitizer and tests/fuzz).

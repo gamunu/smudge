@@ -80,7 +80,7 @@ bool Mode3::Process (RASTERDATA *input)
     BYTE        *pszSptr  = SeedRow;
     BYTE        *pszInPtr = input->rasterdata[myplane];
     BYTE        *pszCurPtr;
-    BYTE        ucByteCount;
+    unsigned int ucByteCount;
     BYTE        *pszOutPtr = compressBuf;
 
     while (size > 0)
