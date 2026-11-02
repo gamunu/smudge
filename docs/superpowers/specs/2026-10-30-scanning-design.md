@@ -185,6 +185,17 @@ page on the glass:
   color page (107344800 bytes) downloaded with a 9.7 MB peak. Through
   the installed agent, Image Capture's bar filled steadily during a
   300 dpi scan, and the saved file was a valid 2516 x 3480 JPEG.
+- **Real-printer checks on the TIFF stream.** Black and white at
+  300 dpi came back with only values 0 and 255. A 600 dpi scan
+  canceled after 15 s left no file, the job `Canceled`, and the
+  scanner Idle within 4 s. A full-glass 1200 dpi color scan took
+  271 s (10200 x 14032) with the agent at 17 MB.
+- **Known limitation: JPEG file requests.** An ImageCaptureCore client
+  that asks for a JPEG file in file transfer mode gets the streamed
+  TIFF bytes saved under a `.jpeg` name; the AirScan module ignores the
+  reply's `Content-Type` (an honest `image/tiff` changed nothing).
+  Image Capture and Preview's Import from Scanner both save real JPEGs,
+  and requests for PNG are converted.
 
 ## Goals
 
