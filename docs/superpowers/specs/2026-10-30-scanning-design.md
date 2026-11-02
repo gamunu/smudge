@@ -167,6 +167,20 @@ page on the glass:
   Image Capture give up at 60 s, so demo runs do not stand in for the
   printer on this point. At 75 dpi ImageCaptureCore saved the 637 x 877
   page resampled to 2550 x 3508 at 72 dpi.
+- **Image Capture's progress bar.** For a real scan (not the overview
+  preview, which has its own display) the bar is bytes received
+  against the size of an uncompressed image of the scan area. A 60 s
+  JPEG stream (414 KB) moved it a few pixels before the file was done,
+  with or without `Content-Length`. The same page as a 34 MB
+  uncompressed TIFF, streamed over 60 s, filled it steadily to the
+  end. Image Capture does not list a scanner whose formats leave out
+  `image/jpeg`; a scanner that offers JPEG and answers with TIFF bytes
+  is decoded by content and works.
+- **Raw costs no time.** Raw color at 300 dpi took 18.8 s (26836200
+  bytes, exactly width x height x 3) against 17.8 s for JPEG. At 1200
+  dpi it took 264 s (429379200 bytes) against 272 s. The probe peaked
+  at 4.2 GB resident on the 1200 dpi raw page, against 84 MB for JPEG:
+  the USB read loop does not release its buffers until it returns.
 
 ## Goals
 
@@ -274,13 +288,20 @@ printer
   printing or already scanning.
 - `GET /eSCL/ScanJobs/<id>/NextDocument`: the page in the requested
   format, then 404 once the job's page has been sent. The platen
-  gives one page per job. Image Capture gives up on a response that
-  cannot wait for a 4.5 minute 1200 dpi scan to finish before the
-  reply starts, so the reply depends on the job. When the printer's JPEG is
-  the final file (JPEG requested, no post-processing), the reply is
-  `200 image/jpeg` with chunked encoding at once, and the agent sends
-  the page file's bytes as the printer writes them, polling every
-  200 ms. A job that ends canceled or failed mid-stream closes the
+  gives one page per job. Image Capture cannot wait for a 4.5 minute
+  1200 dpi scan to finish before the reply starts, and its progress
+  bar counts bytes against an uncompressed image, so the reply depends
+  on the job. A job whose page needs no whole-image processing (color
+  or gray, JPEG requested, no sharpening) is a streamed job: the agent
+  asks the printer for Raw, and once the job reports `ImageWidth`,
+  `ImageHeight` and `BytesPerLine` it replies `200` with an exact
+  `Content-Length` and streams an uncompressed baseline TIFF (one
+  strip, header first, 8-bit gray or RGB) whose pixel rows are the
+  printer's bytes as they arrive. The reply is labelled `image/jpeg`
+  because that is the format Image Capture asks for. Black and white
+  is streamed the same way as gray thresholded row by row into a 1-bit
+  TIFF. A stream that does not complete closes the connection early,
+  so the client sees an error. A job that ends canceled or failed mid-stream closes the
   connection without the terminating chunk. Every other job waits up
   to 20 s for the processed page, then replies `503` with
   `Retry-After: 2` and no body, and the client asks again. A job
