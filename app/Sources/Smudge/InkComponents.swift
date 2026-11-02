@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import SwiftUI
+import SmudgeCore
 
 func inkColor(_ hex: String?) -> Color {
     guard var h = hex?.trimmingCharacters(in: .whitespaces), h.hasPrefix("#") else { return .gray }

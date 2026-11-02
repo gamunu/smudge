@@ -5,7 +5,7 @@ import Foundation
 import SmudgeKit
 
 /// What the Smudge window shows for the printer's scanner.
-enum ScannerState: Equatable, Sendable {
+public enum ScannerState: Equatable, Sendable {
     /// The printer has no scan interface.
     case none
     case ready
@@ -13,8 +13,8 @@ enum ScannerState: Equatable, Sendable {
     /// Scanner sharing is turned off in Settings.
     case off
 
-    static let sharingKey = "scanSharing"
-    static let sharingChanged = Notification.Name("io.github.gamunu.smudge.scanSharingChanged")
+    public static let sharingKey = "scanSharing"
+    public static let sharingChanged = Notification.Name("io.github.gamunu.smudge.scanSharingChanged")
 
     /// Scanner sharing, on unless the user turned it off.
     static var sharingEnabled: Bool {

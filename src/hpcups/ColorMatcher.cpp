@@ -60,7 +60,7 @@ ColorMatcher::ColorMatcher
         EndPlane = K;
     }
 
-    Contone = (BYTE *) new BYTE[InputWidth * ColorPlaneCount];
+    Contone = (BYTE *) new BYTE[InputWidth * ColorPlaneCount + 8];
     if (Contone == NULL)
     {
         goto MemoryError;
@@ -86,7 +86,7 @@ ColorMatcher::~ColorMatcher()
 void ColorMatcher::Restart()
 // also reset cache when we have one
 {
-    memset(Contone, 0, InputWidth*ColorPlaneCount);
+    memset(Contone, 0, InputWidth*ColorPlaneCount + 8);
 
     started = false;
 }

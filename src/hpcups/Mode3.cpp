@@ -80,7 +80,7 @@ bool Mode3::Process (RASTERDATA *input)
     BYTE        *pszSptr  = SeedRow;
     BYTE        *pszInPtr = input->rasterdata[myplane];
     BYTE        *pszCurPtr;
-    BYTE        ucByteCount;
+    unsigned int ucByteCount;
     BYTE        *pszOutPtr = compressBuf;
 
     while (size > 0)
@@ -89,7 +89,7 @@ bool Mode3::Process (RASTERDATA *input)
 
         if (seeded)
         {
-            while ((*pszSptr == *pszInPtr) && (uOffset < size))
+            while ((uOffset < size) && (*pszSptr == *pszInPtr))
             {
                 pszSptr++;
                 pszInPtr++;
@@ -108,7 +108,7 @@ bool Mode3::Process (RASTERDATA *input)
         ucByteCount = 1;
         pszSptr++;
         pszInPtr++;
-        while ((*pszSptr != *pszInPtr) && ucByteCount < size && ucByteCount < 8)
+        while (ucByteCount < size && ucByteCount < 8 && (*pszSptr != *pszInPtr))
         {
             pszSptr++;
             pszInPtr++;

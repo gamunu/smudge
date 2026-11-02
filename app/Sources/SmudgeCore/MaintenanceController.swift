@@ -6,7 +6,7 @@ import SmudgeKit
 import SwiftUI
 
 /// Where a guided maintenance flow is.
-enum FlowStage: Equatable {
+public enum FlowStage: Equatable, Sendable {
     case prepare
     case starting
     case running            // printer is busy (printing, cleaning, calibrating)
@@ -19,26 +19,26 @@ enum FlowStage: Equatable {
 }
 
 /// Something the user has to fix while a flow waits. The job continues by itself afterwards.
-enum Attention: Equatable {
+public enum Attention: Equatable, Sendable {
     case loadPaper
     case closeDoor
     case other(String)
 
-    var title: String {
+    public var title: String {
         switch self {
         case .loadPaper: return "Put paper in the printer"
         case .closeDoor: return "Close the front door"
         case .other(let s): return s
         }
     }
-    var detail: String {
+    public var detail: String {
         switch self {
         case .loadPaper: return "Put plain paper in the tray at the back. The job carries on by itself."
         case .closeDoor: return "Close the front door of the printer. The job carries on by itself."
         case .other: return "Check the printer. The job carries on once the problem is fixed."
         }
     }
-    var symbol: String {
+    public var symbol: String {
         switch self {
         case .loadPaper: return "doc.badge.plus"
         case .closeDoor: return "door.left.hand.open"
@@ -48,25 +48,25 @@ enum Attention: Equatable {
 }
 
 /// One entry of /Jobs/JobList.
-struct LEDMJob: Equatable, Sendable {
-    var url: String
-    var category: String
-    var state: String
-    var calibrationState: String?
+public struct LEDMJob: Equatable, Sendable {
+    public var url: String
+    public var category: String
+    public var state: String
+    public var calibrationState: String?
 
     /// Anything that is not finished: Processing, Pending, Paused and so on.
-    var isActive: Bool {
+    public var isActive: Bool {
         let l = state.lowercased()
         return !l.isEmpty && l != "completed" && l != "canceled" && l != "cancelled"
     }
 }
 
 /// What a cancel request did.
-struct CancelResult: Sendable {
+public struct CancelResult: Sendable {
     var found = 0                              // active jobs in the list
     var puts: [(url: String, status: Int)] = []
     var finalCategories: [String]?
-    var error: String?
+    public var error: String?
 
     var stillRunning: Bool {
         guard let c = finalCategories else { return false }
@@ -95,14 +95,14 @@ struct CancelResult: Sendable {
         }
         return out
     }
-    var summary: String { lines.joined(separator: "\n") }
+    public var summary: String { lines.joined(separator: "\n") }
 }
 
-enum Maintenance {
+public enum Maintenance {
     static let cancelJobXML = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<j:Job xmlns:j=\"http://www.hp.com/schemas/imaging/con/ledm/jobs/2009/04/30\" xmlns:dd=\"http://www.hp.com/schemas/imaging/con/dictionaries/1.0/\" xmlns:fax=\"http://www.hp.com/schemas/imaging/con/fax/2008/06/13\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.hp.com/schemas/imaging/con/ledm/jobs/2009/04/30 ../schemas/Jobs.xsd\"><j:JobState>Canceled</j:JobState></j:Job>"
 
     /// Jobs from /Jobs/JobList.
-    static func parseJobList(_ data: Data) -> [LEDMJob] {
+    public static func parseJobList(_ data: Data) -> [LEDMJob] {
         guard let root = parseXML(data) else { return [] }
         return root.descendants("Job").compactMap { n in
             guard let url = n.value("JobUrl") else { return nil }
@@ -116,7 +116,7 @@ enum Maintenance {
 
     /// Cancels every active job on the printer, then waits up to 20 s for it to stop.
     /// Blocking: call off the main thread.
-    static func cancelActivePrinterJobs(client: LEDMClient) -> CancelResult {
+    public static func cancelActivePrinterJobs(client: LEDMClient) -> CancelResult {
         var result = CancelResult()
         do {
             let list = try client.get("/Jobs/JobList", expectRoot: "JobList")
@@ -147,12 +147,12 @@ enum Maintenance {
     }
 
     // Body from HPLIP base/maint.py (CleanXML, setCleanType), sent as in cleanTypeLedm.
-    static func jobXML(_ jobType: String) -> String {
+    public static func jobXML(_ jobType: String) -> String {
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!--  THIS DATA SUBJECT TO DISCLAIMER(S)INCLUDED WITH THE PRODUCT OF ORIGIN. -->\n<ipcap:InternalPrintCap xmlns:ipcap=\"http://www.hp.com/schemas/imaging/con/ledm/internalprintcap/2008/03/21\" xmlns:ipdyn=\"http://www.hp.com/schemas/imaging/con/ledm/internalprintdyn/2008/03/21\" xmlns:dd=\"http://www.hp.com/schemas/imaging/con/dictionaries/1.0/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.hp.com/schemas/imaging/con/ledm/internalprintcap/2008/03/21 ../schemas/InternalPrintCap.xsd http://www.hp.com/schemas/imaging/con/ledm/internalprintdyn/2008/03/21 ../schemas/InternalPrintDyn.xsd http://www.hp.com/schemas/imaging/con/dictionaries/1.0/ ../schemas/dd/DataDictionaryMasterLEDM.xsd\">\n                                <ipdyn:JobType>\(jobType)</ipdyn:JobType>\n</ipcap:InternalPrintCap>"
     }
 
     // base/maint.py dataModelHelper, with the attribute quotes written as plain quotes.
-    static let calibrationPrintingXML = "<cal:CalibrationState xmlns:cal=\"http://www.hp.com/schemas/imaging/con/cnx/markingagentcalibration/2009/04/08\" xmlns:dd=\"http://www.hp.com/schemas/imaging/con/dictionaries/1.0/\">Printing</cal:CalibrationState>"
+    public static let calibrationPrintingXML = "<cal:CalibrationState xmlns:cal=\"http://www.hp.com/schemas/imaging/con/cnx/markingagentcalibration/2009/04/08\" xmlns:dd=\"http://www.hp.com/schemas/imaging/con/dictionaries/1.0/\">Printing</cal:CalibrationState>"
 
     /// Words for the calibration state XML. ScanRequested is checked before Scanning.
     static func calibrationWord(_ xml: String) -> String? {
@@ -172,7 +172,7 @@ enum Maintenance {
         return root.all("Status").compactMap { $0.value("StatusCategory") }
     }
 
-    static func isBusy(_ categories: [String]) -> Bool {
+    public static func isBusy(_ categories: [String]) -> Bool {
         categories.contains { c in
             let l = c.lowercased()
             return ["process", "clean", "align", "calibrat", "busy", "printing", "initializ", "warm"].contains { l.contains($0) }
@@ -180,7 +180,7 @@ enum Maintenance {
     }
 
     /// The first category that needs the user. genuineHP and ready are informational.
-    static func attention(_ categories: [String]) -> Attention? {
+    public static func attention(_ categories: [String]) -> Attention? {
         for c in categories {
             let l = c.lowercased()
             if l == "trayemptyoropen" { return .loadPaper }
@@ -193,7 +193,7 @@ enum Maintenance {
     }
 
     /// Plain words for a status category.
-    static func describe(_ category: String) -> String {
+    public static func describe(_ category: String) -> String {
         switch category.lowercased() {
         case "ready": return "Ready"
         case "processing": return "Printing"
@@ -206,7 +206,7 @@ enum Maintenance {
     }
 
     /// Summary of the live categories for display, ignoring informational ones.
-    static func liveText(_ categories: [String]) -> String {
+    public static func liveText(_ categories: [String]) -> String {
         let shown = categories.filter { $0.lowercased() != "genuinehp" }
         if shown.isEmpty { return categories.isEmpty ? "Waiting for the printer" : "Ready" }
         return shown.map(describe).joined(separator: ", ")
@@ -214,17 +214,17 @@ enum Maintenance {
 }
 
 @MainActor
-final class MaintenanceController: ObservableObject {
-    @Published var job: MaintenanceJob? { didSet { syncActivity() } }   // non-nil while the guided sheet is open
-    @Published var stage: FlowStage = .prepare { didSet { syncActivity() } }
-    @Published var categories: [String] = []     // live ProductStatusDyn categories
-    @Published var calState: String?             // live /Calibration/State, alignment only
-    @Published var attention: Attention?
-    @Published var reached = 0                   // index of the furthest step shown
-    @Published var note: String?                 // extra line on the done screen
-    @Published var caps: PrinterCaps?            // read once per printer, nil until then
-    @Published var cancelling = false { didSet { syncActivity() } }   // a cancel request is in progress
-    @Published var cancelOutcome: String?        // result of the last cancel, shown for a while
+public final class MaintenanceController: ObservableObject {
+    @Published public var job: MaintenanceJob? { didSet { syncActivity() } }   // non-nil while the guided sheet is open
+    @Published public var stage: FlowStage = .prepare { didSet { syncActivity() } }
+    @Published public var categories: [String] = []     // live ProductStatusDyn categories
+    @Published public var calState: String?             // live /Calibration/State, alignment only
+    @Published public var attention: Attention?
+    @Published public var reached = 0                   // index of the furthest step shown
+    @Published public var note: String?                 // extra line on the done screen
+    @Published public var caps: PrinterCaps?            // read once per printer, nil until then
+    @Published public var cancelling = false { didSet { syncActivity() } }   // a cancel request is in progress
+    @Published public var cancelOutcome: String?        // result of the last cancel, shown for a while
 
     private var task: Task<Void, Never>?
     private var client: LEDMClient?
@@ -244,7 +244,7 @@ final class MaintenanceController: ObservableObject {
         activity.set(on ? .maintenance : nil, serial: serial, writer: .app)
     }
 
-    var isBusy: Bool {
+    public var isBusy: Bool {
         if cancelling { return true }
         guard job != nil else { return false }
         switch stage {
@@ -253,7 +253,7 @@ final class MaintenanceController: ObservableObject {
         }
     }
 
-    static func steps(for job: MaintenanceJob, alignment: AlignmentSupport? = nil) -> [String] {
+    public static func steps(for job: MaintenanceJob, alignment: AlignmentSupport? = nil) -> [String] {
         switch job {
         case .clean, .deepClean: return ["Prepare", "Cleaning", "Done"]
         case .diagnostics: return ["Prepare", "Printing", "Check"]
@@ -263,7 +263,7 @@ final class MaintenanceController: ObservableObject {
     }
 
     /// Shows a fixed step with fake state. No printer calls. Only used by `--preview-step`.
-    func applyPreview(_ spec: PreviewMode.Spec) {
+    public func applyPreview(_ spec: PreviewMode.Spec) {
         job = spec.job
         stage = spec.stage
         reached = spec.reached
@@ -285,7 +285,7 @@ final class MaintenanceController: ObservableObject {
         caps = nil
     }
 
-    func supports(_ job: MaintenanceJob) -> Bool { caps?.cards.contains(job) ?? false }
+    public func supports(_ job: MaintenanceJob) -> Bool { caps?.cards.contains(job) ?? false }
 
     private func ledm() throws -> LEDMClient {
         guard let client else { throw LEDMError.noLEDM }
@@ -306,7 +306,7 @@ final class MaintenanceController: ObservableObject {
 
     // MARK: sheet control
 
-    func open(_ job: MaintenanceJob) {
+    public func open(_ job: MaintenanceJob) {
         guard !isBusy else { return }
         task?.cancel()
         reset()
@@ -314,7 +314,7 @@ final class MaintenanceController: ObservableObject {
     }
 
     /// Stops the running flow, then asks the printer to cancel whatever job it has.
-    func cancelFlow() async {
+    public func cancelFlow() async {
         guard job != nil, !cancelling else { return }
         task?.cancel()
         await task?.value          // let an in-flight request finish so it cannot overwrite the stage
@@ -345,14 +345,14 @@ final class MaintenanceController: ObservableObject {
     }
 
     /// Closes the sheet. The printer keeps going with a job it already started.
-    func close() {
+    public func close() {
         task?.cancel()
         task = nil
         job = nil
         reset()
     }
 
-    func retry() {
+    public func retry() {
         guard let j = job else { return }
         task?.cancel()
         reset()
@@ -369,7 +369,7 @@ final class MaintenanceController: ObservableObject {
         cancelOutcome = nil
     }
 
-    func begin() {
+    public func begin() {
         guard let job, !isBusy else { return }
         stage = .starting
         reached = 1

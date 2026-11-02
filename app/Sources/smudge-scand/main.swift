@@ -20,6 +20,7 @@ if args.contains("--probe") {
 } else if args.contains("--serve") {
     runServe(serial: value("--serial"), demo: args.contains("--demo"), demoDelay: Double(value("--delay") ?? "") ?? 1)
 } else if args.isEmpty {
+    redirectLogToUserLibrary()
     Agent().run()
 } else {
     FileHandle.standardError.write(Data("usage: smudge-scand [--serve [--serial S] [--demo] | --probe [--serial S] [--res N] [--format Jpeg|Raw] [--color Color|Gray] --out DIR\n".utf8))

@@ -2,30 +2,15 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import SwiftUI
+import SmudgeCore
 
 extension StatusStore {
-    /// Short connection text for one queue.
-    func connectionText(_ p: PrinterInfo) -> String {
-        switch connection[p.name] {
-        case true?: return "Connected"
-        case false?: return "Not connected"
-        case nil: return DeviceURI.isUSB(p.deviceURI) ? "USB" : "Network"
-        }
-    }
-
     func connectionColor(_ p: PrinterInfo) -> Color {
         switch connection[p.name] {
         case true?: return .green
         case false?: return .red
         case nil: return .secondary
         }
-    }
-
-    /// Model for display. The nickname ends in ", Smudge", which is not part of the model.
-    nonisolated static func model(of p: PrinterInfo) -> String {
-        var m = p.makeAndModel
-        if let r = m.range(of: ", Smudge", options: [.caseInsensitive, .backwards]) { m.removeSubrange(r) }
-        return m.isEmpty ? (DeviceURI.model(p.deviceURI) ?? "Unknown model") : m
     }
 }
 

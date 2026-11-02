@@ -8,7 +8,7 @@ import SmudgeScan
 private func err(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
 
 /// One scanner served over loopback eSCL and announced on the local-only Bonjour interface.
-final class ScannerService {
+final class ScannerService: Sendable {
     let router: ESCLRouter
     let server: HTTPServer
     let advert: BonjourAdvert

@@ -553,7 +553,10 @@ DRIVER_ERROR    LJZjStream::encapsulateColor (RASTERDATA *raster)
       return encapsulateColor2(raster);
     }
 
-    HPLJZjsJbgEncSt     *se = (HPLJZjsJbgEncSt *) (raster->rasterdata[COLORTYPE_COLOR] + raster->rastersize[COLORTYPE_COLOR]);
+    // The encoder state sits unaligned after the data, so copy it out.
+    HPLJZjsJbgEncSt     seCopy;
+    memcpy (&seCopy, raster->rasterdata[COLORTYPE_COLOR] + raster->rastersize[COLORTYPE_COLOR], sizeof (seCopy));
+    HPLJZjsJbgEncSt     *se = &seCopy;
 
     if (m_pJA->color_mode == 0)
     {

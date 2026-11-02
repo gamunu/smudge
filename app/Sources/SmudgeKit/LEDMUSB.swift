@@ -31,10 +31,23 @@ public enum LEDMError: Error, LocalizedError {
     }
 }
 
+/// Byte pipe to a printer's LEDM interface. LEDMUSBConnection is the real one; tests use a fake.
+public protocol LEDMTransport: AnyObject {
+    func write(_ data: Data, timeout: TimeInterval) throws
+    /// Reads one transfer. Returns empty Data on timeout.
+    func read(timeout: TimeInterval) throws -> Data
+    /// Throws away anything the printer still has queued from earlier requests.
+    func drain(quiet: TimeInterval)
+}
+
+extension LEDMTransport {
+    func write(_ data: Data) throws { try write(data, timeout: 5) }
+}
+
 /// One claimed LEDM interface (management 255/4/1, or scan 255/0xcc/0).
 /// Uses IOUSBHost, so there is no libusb dependency. Not thread safe on its
 /// own: LEDMClient serializes access.
-public final class LEDMUSBConnection {
+public final class LEDMUSBConnection: LEDMTransport {
     private let interface: IOUSBHostInterface
     private let outPipe: IOUSBHostPipe
     private let inPipe: IOUSBHostPipe

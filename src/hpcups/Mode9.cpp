@@ -225,7 +225,7 @@ bool Mode9::Process(RASTERDATA* input)
 
         size -= offset;
 
-        if ((*nptr != nptr[1]) || (size < 2))   /************  if doing a mode 0 **********/
+        if ((size < 2) || (*nptr != nptr[1]))   /************  if doing a mode 0 **********/
         {
             command.bitf0.type = 0;
             last_byte = *nptr++;   /* keep track of the last_byte */
@@ -240,12 +240,12 @@ bool Mode9::Process(RASTERDATA* input)
                especially if there are already 7 mode 0 bytes here
                (we've already spent the extra byte for the
                byte-count) */
-            while ((*sptr++ != *nptr) && (last_byte != *nptr) && (byte_count < size))
+            while ((byte_count < size) && (*sptr != *nptr) && (last_byte != *nptr))
             {
+               sptr++;
                byte_count++;
                last_byte = *nptr++;
             }
-            sptr--;
 
             /* Adjust the count if the last_byte == current_byte.
                Save these bytes for the upcomming run of mode 1. */
@@ -329,11 +329,11 @@ bool Mode9::Process(RASTERDATA* input)
             last_byte = *nptr++;
             byte_count = 2;
 
-            while ((last_byte == *nptr++) && (byte_count < size))
+            while ((byte_count < size) && (last_byte == *nptr))
             {
+               nptr++;
                byte_count++;
             }
-            nptr--;
             sptr += byte_count;
             size -= byte_count;
 

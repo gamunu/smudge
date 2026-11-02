@@ -269,11 +269,13 @@ DRIVER_ERROR Job::Configure()
 
 DRIVER_ERROR Job::setBlackRaster()
 {
+    // unpackBits() writes whole bytes of 8 pixels, so round the width up.
+    size_t    size = (m_job_attributes.media_attributes.printable_width + 7) / 8 * 8;
     if (!m_pBlackRaster) {
-        m_pBlackRaster = new BYTE[m_job_attributes.media_attributes.printable_width];
+        m_pBlackRaster = new BYTE[size];
         NEWCHECK(m_pBlackRaster);
     }
-    memset(m_pBlackRaster, 0, m_job_attributes.media_attributes.printable_width);
+    memset(m_pBlackRaster, 0, size);
 
     return NO_ERROR;
 } //setBlackRaster

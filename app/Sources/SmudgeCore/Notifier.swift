@@ -4,7 +4,7 @@
 import Foundation
 import UserNotifications
 
-final class Notifier {
+public final class Notifier {
     func requestAuthorization() {
         guard Bundle.main.bundleIdentifier != nil else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }

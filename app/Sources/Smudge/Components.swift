@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import SwiftUI
+import SmudgeCore
 
 /// Shared spacing, radius and type scale. Every screen uses these so edges line up.
 enum Space {

@@ -5,8 +5,8 @@ import Foundation
 
 /// Hidden launch argument `--preview-step <name>` opens the maintenance sheet on a fixed step
 /// with made-up state. Nothing talks to the printer in this mode. Used for screenshots.
-enum PreviewMode {
-    struct Spec {
+public enum PreviewMode {
+    public struct Spec: Sendable {
         var job: MaintenanceJob
         var stage: FlowStage
         var reached: Int
@@ -15,7 +15,7 @@ enum PreviewMode {
         var calState: String?
     }
 
-    static let spec: Spec? = {
+    public static let spec: Spec? = {
         let a = CommandLine.arguments
         guard let i = a.firstIndex(of: "--preview-step"), i + 1 < a.count else { return nil }
         switch a[i + 1].lowercased() {
@@ -48,5 +48,5 @@ enum PreviewMode {
         }
     }()
 
-    static var isActive: Bool { spec != nil }
+    public static var isActive: Bool { spec != nil }
 }

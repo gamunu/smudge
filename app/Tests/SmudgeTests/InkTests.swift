@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import XCTest
-@testable import Smudge
+@testable import SmudgeCore
 
 final class InkTests: XCTestCase {
     func testTwoCartridgesFromRealShape() throws {

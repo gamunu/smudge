@@ -53,10 +53,10 @@ func parseXML(_ data: Data) -> XMLNode? {
     return p.parse() ? b.root : (b.root)
 }
 
-enum InkState: String, Equatable, Sendable {
+public enum InkState: String, Equatable, Sendable {
     case ok, low, veryLow, empty, missing, nonHP, unknown
 
-    var text: String {
+    public var text: String {
         switch self {
         case .ok: return "OK"
         case .low: return "Low"
@@ -77,27 +77,27 @@ enum InkState: String, Equatable, Sendable {
     }
 }
 
-struct InkCartridge: Identifiable, Equatable, Sendable {
-    var label: String          // CMY or K, as the printer reports it
-    var percent: Int?          // nil when the printer does not report one
-    var state: InkState
-    var rawState: String
-    var measured: String
-    var product: String?       // e.g. 682
+public struct InkCartridge: Identifiable, Equatable, Sendable {
+    public var label: String          // CMY or K, as the printer reports it
+    public var percent: Int?          // nil when the printer does not report one
+    public var state: InkState
+    public var rawState: String
+    public var measured: String
+    public var product: String?       // e.g. 682
 
-    var id: String { label }
-    var bands: [InkBand] { InkLabel.bands(label) }
-    var name: String { InkLabel.name(label) }
-    var isBlack: Bool { bands == [.black] }
-    var isMulti: Bool { bands.count > 1 }
-    var colorHex: String { bands.first?.hex ?? InkBand.other.hex }
+    public var id: String { label }
+    public var bands: [InkBand] { InkLabel.bands(label) }
+    public var name: String { InkLabel.name(label) }
+    public var isBlack: Bool { bands == [.black] }
+    public var isMulti: Bool { bands.count > 1 }
+    public var colorHex: String { bands.first?.hex ?? InkBand.other.hex }
 }
 
 /// One color stripe of a cartridge.
-enum InkBand: String, Equatable, Sendable {
+public enum InkBand: String, Equatable, Sendable {
     case cyan, magenta, yellow, black, lightCyan, lightMagenta, photo, gray, other
 
-    var hex: String {
+    public var hex: String {
         switch self {
         case .cyan: return "#00ADEE"
         case .magenta: return "#E6198C"
@@ -110,7 +110,7 @@ enum InkBand: String, Equatable, Sendable {
         case .other: return "#888888"
         }
     }
-    var title: String {
+    public var title: String {
         switch self {
         case .cyan: return "Cyan"
         case .magenta: return "Magenta"
@@ -126,8 +126,8 @@ enum InkBand: String, Equatable, Sendable {
 }
 
 /// Reads the label codes printers send (K, C, M, Y, CMY, CMYK, LC, LM, PK and so on).
-enum InkLabel {
-    static func bands(_ label: String) -> [InkBand] {
+public enum InkLabel {
+    public static func bands(_ label: String) -> [InkBand] {
         let l = label.uppercased()
         switch l {
         case "LC": return [.lightCyan]
@@ -147,7 +147,7 @@ enum InkLabel {
         }
     }
 
-    static func name(_ label: String) -> String {
+    public static func name(_ label: String) -> String {
         let b = bands(label)
         if b == [.other] { return label }
         if b.count == 1 { return b[0].title }
@@ -158,17 +158,17 @@ enum InkLabel {
     }
 }
 
-struct InkReport: Equatable, Sendable {
-    var cartridges: [InkCartridge]
+public struct InkReport: Equatable, Sendable {
+    public var cartridges: [InkCartridge]
     var alignmentMode: String?
-    var fetched: Date
+    public var fetched: Date
 }
 
-enum InkParser {
+public enum InkParser {
     /// Maps the ConsumableConfigDyn reply to cartridges. Level and state rules follow
     /// HPLIP's StatusType10Agents (base/status.py): 0 percent means empty (unless the
     /// quantity state is unknown) and 10 percent or less means low.
-    static func parse(_ data: Data) -> InkReport? {
+    public static func parse(_ data: Data) -> InkReport? {
         guard let root = parseXML(data), root.name == "ConsumableConfigDyn" else { return nil }
         var out: [InkCartridge] = []
         for info in root.all("ConsumableInfo") {
@@ -209,11 +209,11 @@ enum InkParser {
     }
 }
 
-enum MaintenanceJob: String, CaseIterable, Identifiable, Sendable {
+public enum MaintenanceJob: String, CaseIterable, Identifiable, Sendable {
     case clean, deepClean, diagnostics, align
 
-    var id: String { rawValue }
-    var title: String {
+    public var id: String { rawValue }
+    public var title: String {
         switch self {
         case .clean: return "Clean print heads"
         case .deepClean: return "Deep clean"
@@ -222,7 +222,7 @@ enum MaintenanceJob: String, CaseIterable, Identifiable, Sendable {
         }
     }
     /// InternalPrintDyn JobType, nil for alignment.
-    var jobType: String? {
+    public var jobType: String? {
         switch self {
         case .clean: return "cleaningPage"
         case .deepClean: return "cleaningPageLevel2"

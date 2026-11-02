@@ -569,6 +569,13 @@ bool Lidil::selectPrintMode(int index)
 {
     PrintMode    *p = lidil_print_modes_table[index].print_modes;
     int iPMIndex = 0; 
+
+    // Both maps are 5 x 5 and the indexes come from cupsInteger1 and 2.
+    if ((unsigned int) m_pJA->integer_values[1] > 4 || (unsigned int) m_pJA->integer_values[2] > 4)
+    {
+        dbglog("Unsupported Cartridge and Print Quality values..\n");
+        return false;
+    }
     
     if (!strcmp(m_pJA->printer_platform, "dj4100") || (!strcmp(m_pJA->printer_platform, "dj2600")))
     { 

@@ -199,7 +199,7 @@ You need Xcode and `brew install jpeg-turbo pkgconf`.
 
 `build/app.noindex/Smudge.app/Contents/MacOS/Smudge --dump` prints the printer state, ink and job list as text. `--ledm-get <path>` prints one raw printer document. `--preview-step <name>` opens a maintenance step with fake data, so you can look at the screens without printing.
 
-`smudge-scand --probe --res 75 --out <dir>` runs one scan straight over USB and logs every LEDM request. `smudge-scand --serve --demo` serves a fake scanner to Image Capture without a printer. The installed helper logs scan jobs to `/tmp/smudge-scand.log`.
+`smudge-scand --probe --res 75 --out <dir>` runs one scan straight over USB and logs every LEDM request. `smudge-scand --serve --demo` serves a fake scanner to Image Capture without a printer. The installed helper logs scan jobs to `~/Library/Logs/Smudge/smudge-scand.log`.
 
 ## Releases and updates
 

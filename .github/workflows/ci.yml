@@ -23,10 +23,15 @@ jobs:
     env:
       SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check license headers
         run: scripts/check-spdx.sh
+
+      - name: Lint shell scripts
+        run: |
+          brew install shellcheck
+          shellcheck -S warning scripts/*.sh scripts/pkg-postinstall scripts/smudge-firmware-load install.sh
 
       - name: Select Xcode
         run: |
@@ -45,7 +50,10 @@ jobs:
 
       - name: Test app
         working-directory: app
-        run: swift test
+        run: swift test --enable-code-coverage
+
+      - name: Check coverage floors
+        run: scripts/coverage.sh
 
       - name: Build app
         run: scripts/build-app.sh
@@ -54,8 +62,50 @@ jobs:
         run: scripts/build-pkg.sh
 
       - name: Upload pkg
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smudge-pkg
           path: build/smudge-*.pkg
           if-no-files-found: error
+
+  sanitizers:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      - name: Install jpeg-turbo
+        run: brew install jpeg-turbo pkgconf
+
+      - name: Test filter under ASan and UBSan
+        run: make asan
+
+  fuzz:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      - name: Install LLVM, jpeg-turbo and pkgconf
+        run: brew install llvm jpeg-turbo pkgconf
+
+      - name: Fuzz the raster filter
+        run: make fuzz FUZZ_TIME=120
+
+      - name: Upload crash inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crashes
+          path: build/fuzz/crash-*
+          if-no-files-found: ignore

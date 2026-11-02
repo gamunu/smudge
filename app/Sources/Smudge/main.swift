@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import Foundation
+import SmudgeCore
 
 let cliArgs = CommandLine.arguments
 if let i = cliArgs.firstIndex(of: "--ledm-get") {

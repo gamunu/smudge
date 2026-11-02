@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import SwiftUI
+import SmudgeCore
 
 enum SidebarItem: String, CaseIterable, Identifiable {
     case overview, jobs, ink, maintenance, settings

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import SwiftUI
+import SmudgeCore
 
 struct SettingsView: View {
     @AppStorage("notificationsEnabled") private var notifications = true

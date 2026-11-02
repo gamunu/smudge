@@ -5,7 +5,8 @@
   Per-user agent that makes an attached HP scanner available to Image Capture
   and Preview. It listens on 127.0.0.1 only and announces itself on the
   local-only Bonjour interface. It runs in every graphical login session, and
-  only the agent of the user at the console serves.
+  only the agent of the user at the console serves. It writes its log to
+  ~/Library/Logs/Smudge/smudge-scand.log of the user it runs as.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -24,7 +25,5 @@
     <string>Background</string>
     <key>LimitLoadToSessionType</key>
     <string>Aqua</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/smudge-scand.log</string>
 </dict>
 </plist>

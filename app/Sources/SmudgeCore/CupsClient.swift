@@ -4,29 +4,29 @@
 import Foundation
 import CCups
 
-struct InkSupply: Equatable {
-    var name: String
-    var level: Int      // 0...100, negative means unknown
-    var colorHex: String?
+public struct InkSupply: Equatable, Sendable {
+    public var name: String
+    public var level: Int      // 0...100, negative means unknown
+    public var colorHex: String?
 }
 
-struct PrinterInfo: Equatable {
-    var name: String
-    var makeAndModel: String
-    var deviceURI: String
+public struct PrinterInfo: Equatable, Sendable {
+    public var name: String
+    public var makeAndModel: String
+    public var deviceURI: String
 }
 
-struct PrinterStatus: Equatable {
-    var name: String
-    var stateCode: Int            // 3 idle, 4 processing, 5 stopped
-    var message: String
-    var reasons: [String]
-    var deviceURI: String
-    var makeAndModel: String
-    var ink: [InkSupply]
-    var error: String?
+public struct PrinterStatus: Equatable, Sendable {
+    public var name: String
+    public var stateCode: Int            // 3 idle, 4 processing, 5 stopped
+    public var message: String
+    public var reasons: [String]
+    public var deviceURI: String
+    public var makeAndModel: String
+    public var ink: [InkSupply]
+    public var error: String?
 
-    var stateText: String {
+    public var stateText: String {
         switch stateCode {
         case 3: return "Idle"
         case 4: return "Processing"
@@ -36,17 +36,17 @@ struct PrinterStatus: Equatable {
     }
 }
 
-struct PrintJob: Identifiable, Equatable {
-    var id: Int
-    var title: String
-    var user: String
-    var sizeKB: Int
-    var stateCode: Int
-    var time: Date
-    var reasons: [String]
+public struct PrintJob: Identifiable, Equatable, Sendable {
+    public var id: Int
+    public var title: String
+    public var user: String
+    public var sizeKB: Int
+    public var stateCode: Int
+    public var time: Date
+    public var reasons: [String]
 
-    var isActive: Bool { stateCode >= 3 && stateCode <= 6 }
-    var stateText: String {
+    public var isActive: Bool { stateCode >= 3 && stateCode <= 6 }
+    public var stateText: String {
         switch stateCode {
         case 3: return "Pending"
         case 4: return "Held"
@@ -60,22 +60,22 @@ struct PrintJob: Identifiable, Equatable {
     }
 }
 
-enum CupsError: Error, LocalizedError {
+public enum CupsError: Error, LocalizedError {
     case ipp(String)
     case denied(String)     // CUPS answered forbidden or not authorized
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self { case .ipp(let s), .denied(let s): return s }
     }
 }
 
 /// Blocking libcups calls. Call from a background context.
-enum Cups {
+public enum Cups {
     static func lastError() -> String {
         if let p = cupsLastErrorString() { return String(cString: p) }
         return "unknown CUPS error"
     }
 
-    static func listPrinters() -> [PrinterInfo] {
+    public static func listPrinters() -> [PrinterInfo] {
         var dests: UnsafeMutablePointer<cups_dest_t>?
         let n = cupsGetDests2(nil, &dests)
         defer { if let d = dests { cupsFreeDests(n, d) } }
@@ -124,7 +124,7 @@ enum Cups {
         return (0..<c).map { Int(ippGetInteger(attr, $0)) }
     }
 
-    static func printerStatus(_ info: PrinterInfo) -> PrinterStatus {
+    public static func printerStatus(_ info: PrinterInfo) -> PrinterStatus {
         var st = PrinterStatus(name: info.name, stateCode: 0, message: "", reasons: [],
                                deviceURI: info.deviceURI, makeAndModel: info.makeAndModel,
                                ink: [], error: nil)
@@ -160,7 +160,7 @@ enum Cups {
         return st
     }
 
-    static func jobs(for printer: String, limit: Int = 15) -> [PrintJob] {
+    public static func jobs(for printer: String, limit: Int = 15) -> [PrintJob] {
         var list: UnsafeMutablePointer<cups_job_t>?
         let n = cupsGetJobs2(nil, &list, printer, 0, CUPS_WHICHJOBS_ALL)
         defer { if let l = list { cupsFreeJobs(n, l) } }
@@ -240,7 +240,7 @@ enum Cups {
         return cupsLastError()
     }
 
-    static func cancel(job: Int, printer: String) throws {
+    public static func cancel(job: Int, printer: String) throws {
         var status = sendCancel(job: job, printer: printer, useJobURI: false)
         if isDenied(status) { status = sendCancel(job: job, printer: printer, useJobURI: true) }
         if status.rawValue >= IPP_STATUS_ERROR_BAD_REQUEST.rawValue {
@@ -249,7 +249,7 @@ enum Cups {
     }
 
     /// Cancels each active job on its own. The all-jobs operation (Cancel-Jobs) is operator-only.
-    static func cancelAll(printer: String) throws {
+    public static func cancelAll(printer: String) throws {
         var firstError: Error?
         for j in jobs(for: printer, limit: 100) where j.isActive {
             do { try cancel(job: j.id, printer: printer) } catch { firstError = firstError ?? error }
@@ -268,7 +268,7 @@ enum Cups {
 
     /// Pause then resume, the same as cupsdisable followed by cupsenable. Clears a queue that
     /// still reports "processing" after its job is gone.
-    static func resetQueue(printer: String) throws {
+    public static func resetQueue(printer: String) throws {
         var pauseError: Error?
         do { try setPaused(true, printer: printer) } catch { pauseError = error }
         try setPaused(false, printer: printer)

@@ -126,7 +126,9 @@ DRIVER_ERROR Hbpl1::StartJob(SystemServices *pSystemServices, JobAttributes *pJA
     m_nStripSize = m_nScanLineSize * 3 * m_nStripHeight;
     m_numStrips = m_JA.media_attributes.printable_height/m_nStripHeight;
    	m_Economode = (m_JA.integer_values[2] == ON) ? true : false;  //Economode
-    m_ColorTheme = (COLORTHEME)m_JA.integer_values[5]; // cupsInteger5 value
+    // cupsInteger5 comes from the job. Out of range values mean no theme.
+    m_ColorTheme = (m_JA.integer_values[5] >= NONE && m_JA.integer_values[5] <= VIVIDSRGB)
+                 ? (COLORTHEME)m_JA.integer_values[5] : NONE;
     m_PrintinGrayscale = m_JA.integer_values[3]; // cupsInterger3 value
     m_pSystemServices = pSystemServices; //Reset and UEL not required
     err = m_pHbpl1Wrapper->StartJob((void**)&m_pOutBuffer, &m_OutBuffSize);
@@ -197,7 +199,8 @@ DRIVER_ERROR Hbpl1::FormFeed ()
 		memset(m_pbyStripData,0xFF,m_nStripSize);
 	}
 
-	while(m_nBandCount < m_numStrips)
+	// No strip buffer yet means the page had no raster rows.
+	while(m_pbyStripData && m_nBandCount < m_numStrips)
 	{
 		++m_nBandCount;
 		m_pHbpl1Wrapper->Encapsulate(m_pbyStripData, m_nStripSize, m_nStripHeight, (void**)&m_pOutBuffer, &m_OutBuffSize);

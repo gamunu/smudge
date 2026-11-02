@@ -7,16 +7,20 @@ import Foundation
 /// interface, the same way HPLIP's EWS_LEDM channel does. One request at a
 /// time; each request drains stale bytes first and reads until a full reply
 /// whose root element matches the resource arrives.
-public final class LEDMClient: @unchecked Sendable {
+public final class LEDMClient: @unchecked Sendable {  // requests are serialized by lock
     private let lock = NSLock()
     private let queue = DispatchQueue(label: "ledm.usb", qos: .utility)
     /// USB serial of the printer this client talks to. nil means the only attached HP device.
     public let serial: String?
     public let channel: LEDMChannel
+    /// Opens the transport for one request. USB by default; tests inject an in-memory fake.
+    private let open: (String?, LEDMChannel) throws -> LEDMTransport
 
-    public init(serial: String?, channel: LEDMChannel = .management) {
+    public init(serial: String?, channel: LEDMChannel = .management,
+                open: @escaping (String?, LEDMChannel) throws -> LEDMTransport = { try LEDMUSBConnection(serial: $0, channel: $1) }) {
         self.serial = serial
         self.channel = channel
+        self.open = open
     }
     public var overallTimeout: TimeInterval = 18
     public var verbose = false
@@ -48,7 +52,7 @@ public final class LEDMClient: @unchecked Sendable {
     /// requests on this client wait until the closure returns.
     public func withSession<T>(_ body: (LEDMSession) throws -> T) throws -> T {
         lock.lock(); defer { lock.unlock() }
-        let conn = try LEDMUSBConnection(serial: serial, channel: channel)
+        let conn = try open(serial, channel)
         conn.drain(quiet: 1.0)
         let session = LEDMSession(conn: conn)
         if verbose { session.log = { [self] in log($0) } }
@@ -104,13 +108,14 @@ public final class LEDMClient: @unchecked Sendable {
     }
 
     private func attemptOnce(_ request: Data, expectRoot: String?) throws -> LEDMResponse {
-        let conn = try LEDMUSBConnection(serial: serial, channel: channel)
+        let conn = try open(serial, channel)
         conn.drain(quiet: 1.0)
         try conn.write(request)
         let deadline = Date().addingTimeInterval(overallTimeout)
         var reader = LEDMReplyReader(expectRoot: expectRoot) { [self] in log($0) }
         while Date() < deadline {
             if let resp = reader.feed(try conn.read(timeout: 1.0)) { return resp }
+            if reader.overflowed { throw LEDMError.badReply("reply too large") }
         }
         throw LEDMError.timeout
     }
@@ -118,7 +123,7 @@ public final class LEDMClient: @unchecked Sendable {
 
 /// One client per printer serial. Requests to one printer are serialized by its client;
 /// different printers do not wait for each other.
-public final class LEDMClients: @unchecked Sendable {
+public final class LEDMClients: @unchecked Sendable {  // clients is guarded by lock
     public static let shared = LEDMClients()
     private let lock = NSLock()
     private var clients: [String: LEDMClient] = [:]
@@ -155,11 +160,11 @@ public final class LEDMClients: @unchecked Sendable {
 
 /// Several requests over one open interface. Created by LEDMClient.withSession.
 public final class LEDMSession {
-    private let conn: LEDMUSBConnection
+    private let conn: LEDMTransport
     /// Called with each request line and reply status.
     public var log: ((String) -> Void)?
 
-    init(conn: LEDMUSBConnection) { self.conn = conn }
+    init(conn: LEDMTransport) { self.conn = conn }
 
     private func requestLine(_ request: Data) -> String {
         String(decoding: request.prefix(while: { $0 != 0x0d }), as: UTF8.self)
@@ -176,6 +181,7 @@ public final class LEDMSession {
                 log?("<< \(resp.status) \(resp.reason) (\(resp.body.count) bytes)")
                 return resp
             }
+            if reader.overflowed { throw LEDMError.badReply("reply too large") }
         }
         throw LEDMError.timeout
     }
@@ -224,7 +230,10 @@ public final class LEDMSession {
                         payload = rest
                         head = Data()
                     }
-                    if !headDone { return }
+                    if !headDone {
+                        if head.count > LEDMReplyReader.maxBuffer { throw LEDMError.badReply("reply header too large") }
+                        return
+                    }
                 }
                 let body: Data
                 if chunked {
