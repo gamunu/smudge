@@ -22,6 +22,8 @@ func runProbe(value: @escaping (String) -> String?, flag: (String) -> Bool) -> N
     let color = value("--color") ?? "Color"
     let brightness = Int(value("--brightness") ?? "1000") ?? 1000
     let contrast = Int(value("--contrast") ?? "1000") ?? 1000
+    let widthArg = value("--width")
+    let heightArg = value("--height")
     let outDir = URL(fileURLWithPath: value("--out") ?? ".")
     let tag = value("--tag")
     try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
@@ -38,8 +40,8 @@ func runProbe(value: @escaping (String) -> String?, flag: (String) -> Bool) -> N
             err("caps: \(caps.model) \(caps.maxWidth)x\(caps.maxHeight) res \(caps.resolutions)")
             let dev = LEDMScanDevice(serial: serial ?? "", caps: caps)
             dev.log = { err($0) }
-            let w = Int(value("--width") ?? "") ?? caps.maxWidth
-            let h = Int(value("--height") ?? "") ?? caps.maxHeight
+            let w = Int(widthArg ?? "") ?? caps.maxWidth
+            let h = Int(heightArg ?? "") ?? caps.maxHeight
             let req = LEDMScanRequest(resolution: res, xStart: 0, yStart: 0, width: w, height: h, format: format,
                                       colorSpace: color, brightness: brightness, contrast: contrast)
             let ext = format == .jpeg ? "jpg" : "raw"

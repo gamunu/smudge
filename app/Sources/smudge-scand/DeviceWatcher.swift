@@ -10,7 +10,7 @@ import SmudgeKit
 /// the callback, because a matching request filtered on interface class never fires. Removals come
 /// from the USB device itself terminating. Interfaces alone are not enough there: the system tears
 /// them down and recreates them while the printer stays attached.
-final class DeviceWatcher {
+final class DeviceWatcher: @unchecked Sendable {  // `known` is touched on `queue` only
     private let onAdd: (USBDeviceInfo) -> Void
     private let onRemove: (UInt64) -> Void
     private let queue = DispatchQueue(label: "scand.watcher")

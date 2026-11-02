@@ -5,9 +5,12 @@ import Foundation
 import Network
 import SmudgeScan
 
-/// HTTP/1.1 on 127.0.0.1 for one scanner. Binds the loopback address only, and drops any
-/// connection whose peer is not loopback.
-final class HTTPServer {
+/// HTTP/1.1 on 127.0.0.1 for one scanner. Binds the loopback address only, drops any
+/// connection whose peer is not loopback, and refuses requests that came from a web page
+/// (see `LoopbackPolicy`).
+final class HTTPServer: @unchecked Sendable {  // connections and port are guarded by lock
+    /// Image Capture opens one or two connections per scanner. More than this is not a client we serve.
+    static let maxConnections = 16
     private let router: ESCLRouter
     private let log: ((String) -> Void)?
     private let listener: NWListener
@@ -16,6 +19,14 @@ final class HTTPServer {
     private let lock = NSLock()
     private(set) var port: UInt16 = 0
 
+    /// First listener failure, set from the listener's queue and read by init.
+    private final class FailureBox: @unchecked Sendable {  // guarded by lock
+        private let lock = NSLock()
+        private var error: NWError?
+        var value: NWError? { lock.lock(); defer { lock.unlock() }; return error }
+        func set(_ e: NWError) { lock.lock(); error = e; lock.unlock() }
+    }
+
     init(router: ESCLRouter, log: ((String) -> Void)? = nil) throws {
         self.router = router
         self.log = log
@@ -23,21 +34,21 @@ final class HTTPServer {
         params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
         listener = try NWListener(using: params)
         let ready = DispatchSemaphore(value: 0)
-        var failure: NWError?
+        let failed = FailureBox()
         listener.stateUpdateHandler = { state in
             switch state {
             case .ready: ready.signal()
-            case .failed(let e): failure = e; ready.signal()
+            case .failed(let e): failed.set(e); ready.signal()
             default: break
             }
         }
         listener.newConnectionHandler = { [weak self] c in self?.accept(c) }
         listener.start(queue: queue)
-        guard ready.wait(timeout: .now() + 5) == .success, failure == nil, let p = listener.port?.rawValue else {
+        guard ready.wait(timeout: .now() + 5) == .success, failed.value == nil, let p = listener.port?.rawValue else {
             listener.cancel()
-            throw failure ?? NWError.posix(.ETIMEDOUT)
+            throw failed.value ?? NWError.posix(.ETIMEDOUT)
         }
-        port = p
+        lock.lock(); port = p; lock.unlock()
     }
 
     func stop() {
@@ -50,7 +61,16 @@ final class HTTPServer {
     }
 
     private func accept(_ nw: NWConnection) {
-        let c = HTTPConnection(nw, router: router, queue: queue, log: log) { [weak self] conn in
+        lock.lock()
+        let full = connections.count >= Self.maxConnections
+        let port = port
+        lock.unlock()
+        if full {
+            log?("refused connection: \(Self.maxConnections) already open")
+            nw.cancel()
+            return
+        }
+        let c = HTTPConnection(nw, router: router, port: port, queue: queue, log: log) { [weak self] conn in
             guard let self else { return }
             lock.lock(); connections[ObjectIdentifier(conn)] = nil; lock.unlock()
         }
@@ -59,24 +79,28 @@ final class HTTPServer {
     }
 }
 
-private final class HTTPConnection {
-    private static let maxHeader = 64 * 1024
-    private static let maxBody = 1024 * 1024
+private final class HTTPConnection: @unchecked Sendable {  // all mutable state is touched on `queue` only
     private static let chunkSize = 1024 * 1024
+    /// A connection that sends no complete request for this long is closed. Only armed while
+    /// waiting for a request, so a long scan behind NextDocument is not cut off.
+    static let idleTimeout: TimeInterval = 30
 
     private let nw: NWConnection
     private let router: ESCLRouter
+    private let port: UInt16
     private let queue: DispatchQueue
+    private var idleTimer: DispatchWorkItem?
     private let onClose: (HTTPConnection) -> Void
     private let log: ((String) -> Void)?
     private var buffer = Data()
     private var closed = false
 
-    init(_ nw: NWConnection, router: ESCLRouter, queue: DispatchQueue, log: ((String) -> Void)?,
+    init(_ nw: NWConnection, router: ESCLRouter, port: UInt16, queue: DispatchQueue, log: ((String) -> Void)?,
          onClose: @escaping (HTTPConnection) -> Void) {
         self.nw = nw
         self.log = log
         self.router = router
+        self.port = port
         self.queue = queue
         self.onClose = onClose
     }
@@ -98,6 +122,8 @@ private final class HTTPConnection {
     func close() {
         guard !closed else { return }
         closed = true
+        idleTimer?.cancel()
+        idleTimer = nil
         nw.cancel()
         onClose(self)
     }
@@ -114,50 +140,52 @@ private final class HTTPConnection {
     // MARK: request
 
     private func readRequest() {
-        if let (req, used) = parse() {
+        switch HTTPRequestParser.parse(buffer) {
+        case .request(let req, let used):
+            disarmIdle()
             buffer.removeFirst(used)
-            respond(to: req)
-            return
-        }
-        if buffer.count > Self.maxHeader + Self.maxBody { close(); return }
-        nw.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
-            guard let self else { return }
-            if let data, !data.isEmpty { buffer.append(data) }
-            if error != nil || (isComplete && (data ?? Data()).isEmpty) { close(); return }
-            readRequest()
+            if LoopbackPolicy.allows(req, port: port) {
+                respond(to: req)
+            } else {
+                log?("refused \(req.method) \(req.path): host \(req.headers["host"] ?? "none"), origin \(req.headers["origin"] ?? "none")")
+                reject(403)
+            }
+        case .invalid(let status):
+            disarmIdle()
+            reject(status)
+        case .incomplete:
+            armIdle()
+            nw.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+                guard let self else { return }
+                if let data, !data.isEmpty { buffer.append(data) }
+                if error != nil || (isComplete && (data ?? Data()).isEmpty) { close(); return }
+                readRequest()
+            }
         }
     }
 
-    private struct Request { var method: String; var path: String; var body: Data; var keepAlive: Bool }
+    private func armIdle() {
+        guard idleTimer == nil else { return }
+        let item = DispatchWorkItem { [weak self] in self?.close() }
+        idleTimer = item
+        queue.asyncAfter(deadline: .now() + Self.idleTimeout, execute: item)
+    }
 
-    private func parse() -> (Request, Int)? {
-        guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else {
-            if buffer.count > Self.maxHeader { close() }
-            return nil
-        }
-        let head = String(decoding: buffer[buffer.startIndex..<end.lowerBound], as: UTF8.self)
-        var lines = head.components(separatedBy: "\r\n")
-        let first = lines.removeFirst().split(separator: " ")
-        guard first.count >= 2 else { close(); return nil }
-        var length = 0
-        var keepAlive = !(first.count > 2 && first[2] == "HTTP/1.0")
-        for l in lines {
-            guard let c = l.firstIndex(of: ":") else { continue }
-            let k = l[..<c].lowercased(), v = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
-            if k == "content-length" { length = Int(v) ?? 0 }
-            if k == "connection" { keepAlive = v.lowercased() != "close" }
-        }
-        guard length >= 0, length <= Self.maxBody else { close(); return nil }
-        let bodyStart = end.upperBound
-        guard buffer.endIndex - bodyStart >= length else { return nil }
-        let body = Data(buffer[bodyStart..<bodyStart + length])
-        return (Request(method: String(first[0]), path: String(first[1]), body: body, keepAlive: keepAlive),
-                bodyStart + length - buffer.startIndex)
+    private func disarmIdle() {
+        idleTimer?.cancel()
+        idleTimer = nil
+    }
+
+    /// Answers once and closes. The buffer may hold a half-read body, so the connection cannot be reused.
+    private func reject(_ status: Int) {
+        send(head(status, ["Content-Length": "0"], keepAlive: false)) { [weak self] in self?.close() }
     }
 
     // MARK: response
 
-    private static let reasons = [200: "OK", 201: "Created", 400: "Bad Request", 404: "Not Found", 500: "Internal Server Error", 503: "Service Unavailable"]
+    private static let reasons = [200: "OK", 201: "Created", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
+                                  413: "Content Too Large", 431: "Request Header Fields Too Large",
+                                  500: "Internal Server Error", 501: "Not Implemented", 503: "Service Unavailable"]
 
     private func head(_ status: Int, _ headers: [String: String], keepAlive: Bool) -> Data {
         var s = "HTTP/1.1 \(status) \(Self.reasons[status] ?? "Status")\r\n"
@@ -166,7 +194,7 @@ private final class HTTPConnection {
         return Data(s.utf8)
     }
 
-    private func respond(to req: Request) {
+    private func respond(to req: HTTPRequest) {
         let res = router.handle(method: req.method, path: req.path, body: req.body)
         log?("\(req.method) \(req.path) -> \(res.status)")
         var headers = res.headers
@@ -186,14 +214,14 @@ private final class HTTPConnection {
         }
     }
 
-    private func finish(_ keepAlive: Bool) -> () -> Void {
+    private func finish(_ keepAlive: Bool) -> @Sendable () -> Void {
         { [weak self] in
             guard let self else { return }
             if keepAlive { readRequest() } else { close() }
         }
     }
 
-    private func send(_ data: Data, then next: @escaping () -> Void) {
+    private func send(_ data: Data, then next: @escaping @Sendable () -> Void) {
         guard !closed else { return }
         nw.send(content: data, completion: .contentProcessed { [weak self] error in
             if error != nil { self?.close() } else { next() }
@@ -204,9 +232,9 @@ private final class HTTPConnection {
     /// Content-Length, so the client sees an error instead of a truncated file.
     private func pump(_ stream: PageStream, keepAlive: Bool) {
         DispatchQueue.global().async { [weak self] in
+            guard let self else { return }
             let step = stream.next(limit: Self.chunkSize)
-            self?.queue.async {
-                guard let self else { return }
+            queue.async {
                 switch step {
                 case .data(let data):
                     self.send(data) { self.pump(stream, keepAlive: keepAlive) }
@@ -229,7 +257,7 @@ private final class HTTPConnection {
         var h = headers
         h["Content-Type"] = type
         h["Content-Length"] = "\(size)"
-        func step() {
+        @Sendable func step() {
             let data = (try? fh.read(upToCount: Self.chunkSize)) ?? Data()
             if data.isEmpty { try? fh.close(); finish(keepAlive)(); return }
             send(data) { step() }

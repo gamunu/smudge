@@ -9,14 +9,27 @@ private func log(_ s: String) {
     FileHandle.standardError.write(Data(("\(Date()) \(s)\n").utf8))
 }
 
+/// Points stderr at ~/Library/Logs/Smudge/smudge-scand.log. Every logged-in user runs an
+/// agent, so a shared path such as /tmp would let one user plant a symlink that another
+/// user's agent then writes through.
+func redirectLogToUserLibrary() {
+    guard let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first else { return }
+    let dir = lib.appendingPathComponent("Logs/Smudge", isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let fd = open(dir.appendingPathComponent("smudge-scand.log").path, O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    guard fd >= 0 else { return }
+    dup2(fd, STDERR_FILENO)
+    Darwin.close(fd)
+}
+
 /// Serves every attached scanner to Image Capture while this user owns the console and scanner
 /// sharing is on. It holds no USB interface between requests.
-final class Agent {
+final class Agent: @unchecked Sendable {  // mutable state is touched on `queue` only
     static let prefsDomain = "io.github.gamunu.smudge"
     static let sharingKey = "scanSharing"
     static let sharingNotification = "io.github.gamunu.smudge.scanSharingChanged"
 
-    private final class Entry {
+    private final class Entry: @unchecked Sendable {  // fields are touched on `queue` only
         let info: USBDeviceInfo
         var caps: LEDMScanCaps?
         var service: ScannerService?
@@ -44,15 +57,17 @@ final class Agent {
             sharing = Agent.readSharing()
         }
         gate = ConsoleGate { [weak self] isConsole in
-            self?.queue.async { self?.consoleUser = isConsole; self?.apply() }
+            guard let self else { return }
+            queue.async { [self] in self.consoleUser = isConsole; self.apply() }
         }
         queue.sync { consoleUser = gate?.isConsoleUser ?? false }
         DistributedNotificationCenter.default().addObserver(forName: Notification.Name(Agent.sharingNotification), object: nil,
                                                             queue: nil) { [weak self] _ in
-            self?.queue.async { self?.sharing = Agent.readSharing(); self?.apply() }
+            guard let self else { return }
+            queue.async { [self] in self.sharing = Agent.readSharing(); self.apply() }
         }
-        let watcher = DeviceWatcher(onAdd: { [weak self] d in self?.queue.async { self?.add(d) } },
-                                    onRemove: { [weak self] id in self?.queue.async { self?.remove(id) } })
+        let watcher = DeviceWatcher(onAdd: { [weak self] d in guard let self else { return }; queue.async { [self] in self.add(d) } },
+                                    onRemove: { [weak self] id in guard let self else { return }; queue.async { [self] in self.remove(id) } })
         self.watcher = watcher
         watcher.start()
         log("smudge-scand started (console user \(consoleUser), sharing \(sharing))")

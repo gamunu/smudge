@@ -6,7 +6,8 @@ import dnssd
 
 /// A `_uscan._tcp` Bonjour record visible on this Mac only. It registers on the local-only
 /// interface, so no other machine can see it.
-final class BonjourAdvert {
+final class BonjourAdvert: @unchecked Sendable {  // ref is guarded by lock
+    private let lock = NSLock()
     private var ref: DNSServiceRef?
 
     init(name: String, port: UInt16, txt: [(String, String)]) throws {
@@ -29,11 +30,12 @@ final class BonjourAdvert {
                                      port.bigEndian, TXTRecordGetLength(&record), TXTRecordGetBytesPtr(&record),
                                      nil, nil)
         guard err == kDNSServiceErr_NoError, let r else { throw BonjourError.register(err) }
-        ref = r
+        lock.lock(); ref = r; lock.unlock()
         DNSServiceSetDispatchQueue(r, DispatchQueue(label: "bonjour.\(name)"))
     }
 
     func stop() {
+        lock.lock(); defer { lock.unlock() }
         if let ref { DNSServiceRefDeallocate(ref) }
         ref = nil
     }

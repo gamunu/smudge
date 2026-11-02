@@ -21,6 +21,7 @@ for uid in $(ps -axo uid=,comm= | awk '/\/loginwindow$/ {print $1}' | sort -u); 
     launchctl bootout "gui/$uid" "$agentplist" > /dev/null 2>&1 || true
 done
 pkill -x smudge-scand 2>/dev/null || true
+# Releases up to 0.2.0 logged to /tmp. rm does not follow a symlink there.
 rm -f "$agentplist" /tmp/smudge-scand.log
 
 fwplist=/Library/LaunchDaemons/io.github.gamunu.smudge.firmware.plist
@@ -39,7 +40,7 @@ pkgutil --forget io.github.gamunu.smudge >/dev/null 2>&1 || true
 if [ -n "${SUDO_USER:-}" ]; then
     home=$(dscl . -read "/Users/$SUDO_USER" NFSHomeDirectory | awk '{print $2}')
     rm -f "$home/Library/Preferences/io.github.gamunu.smudge.plist"
-    rm -rf "$home/Library/Application Support/Smudge/activity" "$home/Library/Caches/Smudge/scan"
+    rm -rf "$home/Library/Application Support/Smudge/activity" "$home/Library/Caches/Smudge/scan" "$home/Library/Logs/Smudge"
 fi
 
 echo "Smudge removed."
