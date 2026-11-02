@@ -3,6 +3,7 @@
 
 import SwiftUI
 import AppKit
+import SmudgeCore
 
 struct OverviewView: View {
     @ObservedObject var store: StatusStore

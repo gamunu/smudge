@@ -4,7 +4,7 @@
 import Foundation
 
 /// Turns IPP printer-state-reasons keywords into plain language.
-enum StatusText {
+public enum StatusText {
     private static let known: [String: String] = [
         "media-empty": "Out of paper",
         "media-needed": "Paper needed",
@@ -32,7 +32,7 @@ enum StatusText {
     ]
 
     /// Returns nil for "none".
-    static func describe(_ reason: String) -> String? {
+    public static func describe(_ reason: String) -> String? {
         if reason == "none" { return nil }
         if reason.hasPrefix("com.hp.") { return "Driver reported: \(reason)" }
         if let t = known[reason] { return t }
@@ -43,7 +43,7 @@ enum StatusText {
         return reason
     }
 
-    static func describe(all reasons: [String]) -> [String] {
+    public static func describe(all reasons: [String]) -> [String] {
         reasons.compactMap(describe)
     }
 

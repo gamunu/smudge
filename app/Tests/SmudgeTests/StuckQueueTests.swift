@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import XCTest
-@testable import Smudge
+@testable import SmudgeCore
 
 final class StuckQueueTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 2_000_000)

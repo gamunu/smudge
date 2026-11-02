@@ -205,7 +205,7 @@ final class ESCLRouterTests: XCTestCase {
         let got = read(s, s.totalLength)
         XCTAssertEqual(s.next(), .end)
         XCTAssertEqual(got.count, s.totalLength)
-        let (img, props) = try decode(got)
+        let (img, _) = try decode(got)
         XCTAssertEqual(tiffValue(got, tag: 258), 1)   // 1 bit per sample in the file itself
         var out = [UInt8](repeating: 9, count: 16 * 8)
         let ctx = CGContext(data: &out, width: 16, height: 8, bitsPerComponent: 8, bytesPerRow: 16,

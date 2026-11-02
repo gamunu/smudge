@@ -6,11 +6,11 @@ import SmudgeKit
 
 // MARK: device URI
 
-enum DeviceURI {
-    static func isUSB(_ uri: String) -> Bool { uri.lowercased().hasPrefix("usb:") }
+public enum DeviceURI {
+    public static func isUSB(_ uri: String) -> Bool { uri.lowercased().hasPrefix("usb:") }
 
     /// The serial in usb://HP/<model>?serial=XXXX, nil when absent or empty.
-    static func serial(_ uri: String) -> String? {
+    public static func serial(_ uri: String) -> String? {
         guard isUSB(uri), let c = URLComponents(string: uri) else { return nil }
         let v = c.queryItems?.first(where: { $0.name.lowercased() == "serial" })?.value
         guard let v, !v.isEmpty else { return nil }
@@ -18,7 +18,7 @@ enum DeviceURI {
     }
 
     /// "DeskJet 2300 series" from usb://HP/DeskJet%202300%20series?serial=X (percent-decoded).
-    static func model(_ uri: String) -> String? {
+    public static func model(_ uri: String) -> String? {
         guard isUSB(uri), let c = URLComponents(string: uri) else { return nil }
         let path = c.path.hasPrefix("/") ? String(c.path.dropFirst()) : c.path
         return path.isEmpty ? nil : path
@@ -27,7 +27,7 @@ enum DeviceURI {
 
 // MARK: capabilities
 
-enum AlignmentSupport: String, Equatable, Sendable {
+public enum AlignmentSupport: String, Equatable, Sendable {
     case automatic, semiAutomatic, manual, none
 
     init(mode: String?) {
@@ -39,7 +39,7 @@ enum AlignmentSupport: String, Equatable, Sendable {
         }
     }
 
-    var summary: String {
+    public var summary: String {
         switch self {
         case .automatic: return "automatic"
         case .semiAutomatic: return "semi-automatic (scan the page)"
@@ -50,12 +50,12 @@ enum AlignmentSupport: String, Equatable, Sendable {
 }
 
 /// What one printer can do, read once from /DevMgmt/InternalPrintCap.xml and ConsumableConfigDyn.
-struct PrinterCaps: Equatable, Sendable {
-    var jobTypes: [String]
-    var alignment: AlignmentSupport
+public struct PrinterCaps: Equatable, Sendable {
+    public var jobTypes: [String]
+    public var alignment: AlignmentSupport
 
     /// Maintenance cards that work on this printer. Manual alignment gets no card.
-    var cards: [MaintenanceJob] {
+    public var cards: [MaintenanceJob] {
         var out: [MaintenanceJob] = []
         for job in MaintenanceJob.allCases {
             if let jt = job.jobType {
@@ -67,28 +67,28 @@ struct PrinterCaps: Equatable, Sendable {
         return out
     }
 
-    var alignmentNote: String? {
+    public var alignmentNote: String? {
         alignment == .manual ? "This printer uses manual alignment, which this app does not support." : nil
     }
 
-    static func parse(printCap: Data, consumables: Data?) -> PrinterCaps {
+    public static func parse(printCap: Data, consumables: Data?) -> PrinterCaps {
         let types = Maintenance.supportedJobTypes(printCap)
         let mode = consumables.flatMap { InkParser.parse($0)?.alignmentMode }
         return PrinterCaps(jobTypes: types, alignment: AlignmentSupport(mode: mode))
     }
 }
 
-enum LEDMSupport: Equatable, Sendable {
+public enum LEDMSupport: Equatable, Sendable {
     case unknown
     case available
     case unavailable(String)
 
-    static let noInkReason = LEDMError.noInterfaceReason
+    public static let noInkReason = LEDMError.noInterfaceReason
 }
 
 // MARK: queue choice
 
-enum PrinterChoice {
+public enum PrinterChoice {
     static func isOurs(_ p: PrinterInfo) -> Bool {
         p.makeAndModel.trimmingCharacters(in: .whitespaces).lowercased().hasSuffix("smudge")
     }
@@ -99,7 +99,7 @@ enum PrinterChoice {
     }
 
     /// Queues made with this driver, else any HP queue, else every queue.
-    static func shown(_ all: [PrinterInfo]) -> [PrinterInfo] {
+    public static func shown(_ all: [PrinterInfo]) -> [PrinterInfo] {
         let ours = all.filter(isOurs)
         if !ours.isEmpty { return ours }
         let hp = all.filter(isHP)
@@ -113,7 +113,7 @@ enum PrinterChoice {
     }
 
     /// True or false for a USB queue with a serial, nil when there is nothing to check.
-    static func connection(of p: PrinterInfo, connected: Set<String>) -> Bool? {
+    public static func connection(of p: PrinterInfo, connected: Set<String>) -> Bool? {
         guard DeviceURI.isUSB(p.deviceURI), let s = DeviceURI.serial(p.deviceURI) else { return nil }
         return connected.contains(s)
     }

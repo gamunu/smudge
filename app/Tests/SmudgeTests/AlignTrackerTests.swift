@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import XCTest
-@testable import Smudge
+@testable import SmudgeCore
 
 /// Drives the alignment state machine with a fake clock and the sequence the
 /// printer really reports.

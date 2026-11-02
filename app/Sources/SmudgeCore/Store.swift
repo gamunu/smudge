@@ -8,10 +8,10 @@ import UserNotifications
 import Combine
 
 @MainActor
-final class StatusStore: ObservableObject {
-    @Published var printers: [PrinterInfo] = []
+public final class StatusStore: ObservableObject {
+    @Published public var printers: [PrinterInfo] = []
     /// Queue name of the selected printer, remembered across launches. Empty until a queue is found.
-    @Published var selected: String = UserDefaults.standard.string(forKey: "printer") ?? "" {
+    @Published public var selected: String = UserDefaults.standard.string(forKey: "printer") ?? "" {
         didSet {
             guard selected != oldValue else { return }
             UserDefaults.standard.set(selected, forKey: "printer")
@@ -21,34 +21,50 @@ final class StatusStore: ObservableObject {
         }
     }
     /// USB connection per queue name. A queue that is not USB, or has no serial, has no entry.
-    @Published var connection: [String: Bool] = [:]
+    @Published public var connection: [String: Bool] = [:]
     /// The selected printer's scanner, read on each poll.
-    @Published var scanner: ScannerState = .none
+    @Published public var scanner: ScannerState = .none
     /// Whether the selected printer speaks LEDM over USB.
-    @Published var ledmSupport: LEDMSupport = .unknown
+    @Published public var ledmSupport: LEDMSupport = .unknown
     private var currentSerial: String?
     private var deviceOpen = false
-    @Published var status: PrinterStatus?
-    @Published var usbPresent: Bool?
-    @Published var jobs: [PrintJob] = []
-    @Published var actionMessage: String?
+    @Published public var status: PrinterStatus?
+    @Published public var usbPresent: Bool?
+    @Published public var jobs: [PrintJob] = []
+    @Published public var actionMessage: String?
     /// LEDM status categories read over USB, nil when not read yet.
     @Published var ledmCategories: [String]?
     /// True when CUPS says "processing" but has had no active job for a while.
-    @Published var queueStuck = false
+    @Published public var queueStuck = false
     private var stuckRule = StuckQueueRule()
     private var ledmInFlight = false
     private var lastLedmFetch = Date.distantPast
-    @Published var ink: InkReport?
-    @Published var inkError: String?
-    @Published var inkLoading = false
-    let maint = MaintenanceController()
+    @Published public var ink: InkReport?
+    @Published public var inkError: String?
+    @Published public var inkLoading = false
+    public let maint = MaintenanceController()
     private var maintSink: AnyCancellable?
 
     /// Name shown for a queue: underscores become spaces.
-    static func displayName(_ queue: String) -> String { queue.replacingOccurrences(of: "_", with: " ") }
-    var displayName: String { Self.displayName(selected) }
-    var selectedInfo: PrinterInfo? { printers.first { $0.name == selected } }
+    public static func displayName(_ queue: String) -> String { queue.replacingOccurrences(of: "_", with: " ") }
+    public var displayName: String { Self.displayName(selected) }
+    public var selectedInfo: PrinterInfo? { printers.first { $0.name == selected } }
+
+    /// Short connection text for one queue.
+    public func connectionText(_ p: PrinterInfo) -> String {
+        switch connection[p.name] {
+        case true?: return "Connected"
+        case false?: return "Not connected"
+        case nil: return DeviceURI.isUSB(p.deviceURI) ? "USB" : "Network"
+        }
+    }
+
+    /// Model for display. The nickname ends in ", Smudge", which is not part of the model.
+    public nonisolated static func model(of p: PrinterInfo) -> String {
+        var m = p.makeAndModel
+        if let r = m.range(of: ", Smudge", options: [.caseInsensitive, .backwards]) { m.removeSubrange(r) }
+        return m.isEmpty ? (DeviceURI.model(p.deviceURI) ?? "Unknown model") : m
+    }
 
     /// Forgets everything read from the previous printer.
     private func resetPrinterState() {
@@ -101,7 +117,7 @@ final class StatusStore: ObservableObject {
         }
     }
 
-    init() {
+    public init() {
         // Views read maint.cancelling and maint.cancelOutcome through the store.
         maintSink = maint.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
     }
@@ -134,14 +150,14 @@ final class StatusStore: ObservableObject {
             || usbPresent == false
     }
 
-    var iconName: String {
+    public var iconName: String {
         if hasProblem { return "exclamationmark.triangle.fill" }
         if scanner == .scanning { return "scanner.fill" }
         if isBusy { return "printer.fill" }
         return "printer"
     }
 
-    func start() {
+    public func start() {
         guard !started, !PreviewMode.isActive else { return }
         started = true
         StatusStore.registerDefaults()
@@ -161,7 +177,7 @@ final class StatusStore: ObservableObject {
     }
 
     /// Why maintenance is unavailable, nil when it can start.
-    var maintenanceBlockReason: String? {
+    public var maintenanceBlockReason: String? {
         if PreviewMode.isActive { return nil }
         if usbPresent == false { return "The printer is not connected over USB." }
         if case .unavailable(let why) = ledmSupport { return "\(why), so maintenance is not available." }
@@ -172,28 +188,28 @@ final class StatusStore: ObservableObject {
         if isBusy { return "The printer is busy printing." }
         return nil
     }
-    var canMaintain: Bool { maintenanceBlockReason == nil }
+    public var canMaintain: Bool { maintenanceBlockReason == nil }
 
-    var activeJob: PrintJob? { jobs.first(where: \.isActive) }
+    public var activeJob: PrintJob? { jobs.first(where: \.isActive) }
 
     /// The job card's line when no print job is active. The printer reports itself busy while it
     /// scans, and that is not printing.
-    var idleJobText: String {
+    public var idleJobText: String {
         isBusy && scanner != .scanning ? "The printer is working." : "Nothing is printing."
     }
 
     /// The one busy rule. Busy means CUPS has an active job (pending, held, processing) or the
     /// printer itself reports processing or calibrating. The CUPS printer-state alone does not
     /// count: it can stay at "processing" after the job is gone.
-    var isBusy: Bool {
+    public var isBusy: Bool {
         if activeJob != nil { return true }
         if let c = ledmCategories, Maintenance.isBusy(c) { return true }
         return false
     }
 
-    enum Health { case ready, scanning, printing, attention, disconnected }
+    public enum Health { case ready, scanning, printing, attention, disconnected }
 
-    var health: Health {
+    public var health: Health {
         guard let s = status else { return .disconnected }
         if usbPresent == false || s.error != nil { return .disconnected }
         if s.stateCode == 5 || s.reasons.contains(where: StatusText.isProblem) { return .attention }
@@ -203,7 +219,7 @@ final class StatusStore: ObservableObject {
         return .ready
     }
 
-    var healthTitle: String {
+    public var healthTitle: String {
         switch health {
         case .ready: return "Ready"
         case .scanning: return "Scanning"
@@ -220,9 +236,9 @@ final class StatusStore: ObservableObject {
     var isCalibrating: Bool { ledmCategories?.contains("calibrating") ?? false }
 
     /// Show "Cancel alignment": the printer is calibrating and CUPS has no job.
-    var canCancelAlignment: Bool { isCalibrating && activeJob == nil && !maint.cancelling }
+    public var canCancelAlignment: Bool { isCalibrating && activeJob == nil && !maint.cancelling }
 
-    func cancelAlignment() {
+    public func cancelAlignment() {
         Task {
             await maint.cancelPrinterJob()
             lastLedmFetch = .distantPast
@@ -231,7 +247,7 @@ final class StatusStore: ObservableObject {
     }
 
     /// Plain-language reasons behind the current state.
-    var healthDetails: [String] {
+    public var healthDetails: [String] {
         var out: [String] = []
         guard let s = status else { return ["Reading the printer state"] }
         if usbPresent == false { out.append("The USB cable is unplugged or the printer is off.") }
@@ -258,7 +274,7 @@ final class StatusStore: ObservableObject {
     }
 
     /// Reads ink levels over LEDM. Called on open and every 60 s.
-    func refreshInk(force: Bool = false) async {
+    public func refreshInk(force: Bool = false) async {
         guard !inkInFlight, !maint.isBusy else { return }
         guard force || Date().timeIntervalSince(lastInkFetch) > 10 else { return }
         if usbPresent == false { ink = nil; inkError = "Printer not connected over USB"; return }
@@ -400,12 +416,12 @@ final class StatusStore: ObservableObject {
 
     // MARK: actions
 
-    func cancel(_ job: PrintJob) { run("Cancel job \(job.id)") { try Cups.cancel(job: job.id, printer: $0) } }
-    func cancel(ids: [Int]) { run("Cancel jobs") { p in for id in ids { try Cups.cancel(job: id, printer: p) } } }
-    func cancelAll() { run("Cancel all jobs") { try Cups.cancelAll(printer: $0) } }
-    func testPage() { run("Test page") { _ = try Cups.printTestPage(printer: $0) } }
-    func resetQueue() { run("Reset queue") { try Cups.resetQueue(printer: $0) } }
-    func togglePause() {
+    public func cancel(_ job: PrintJob) { run("Cancel job \(job.id)") { try Cups.cancel(job: job.id, printer: $0) } }
+    public func cancel(ids: [Int]) { run("Cancel jobs") { p in for id in ids { try Cups.cancel(job: id, printer: p) } } }
+    public func cancelAll() { run("Cancel all jobs") { try Cups.cancelAll(printer: $0) } }
+    public func testPage() { run("Test page") { _ = try Cups.printTestPage(printer: $0) } }
+    public func resetQueue() { run("Reset queue") { try Cups.resetQueue(printer: $0) } }
+    public func togglePause() {
         let pause = status?.stateCode != 5
         run(pause ? "Pause" : "Resume") { try Cups.setPaused(pause, printer: $0) }
     }

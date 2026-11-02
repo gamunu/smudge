@@ -4,6 +4,7 @@
 import Foundation
 import SmudgeKit
 import SmudgeScan
+import SmudgeCore
 
 /// Queue named by --printer, else the first shown queue.
 func cliPrinter() -> PrinterInfo? {

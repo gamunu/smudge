@@ -18,7 +18,7 @@ public enum GeometryWait: Equatable, Sendable {
 }
 
 /// Holds the outcome of a job's page so NextDocument can wait for it.
-public final class PageWaiter: @unchecked Sendable {
+public final class PageWaiter: @unchecked Sendable {  // result is guarded by cond
     private let cond = NSCondition()
     private var result: PageResult?
     private var geometry: PageGeometry?
@@ -71,7 +71,7 @@ public final class PageWaiter: @unchecked Sendable {
 
 /// The TIFF of a streamed job: the header, then the page's rows as the printer writes them.
 /// The length is known up front, so the reply carries a Content-Length.
-public final class PageStream: @unchecked Sendable {
+public final class PageStream: @unchecked Sendable {  // one reader at a time, the next read starts after the last returns
     public enum Step: Equatable, Sendable {
         case data(Data)
         /// Every byte was delivered.

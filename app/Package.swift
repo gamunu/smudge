@@ -20,50 +20,51 @@ let package = Package(
         // USB and LEDM transport shared by the app and the scanner agent.
         .target(
             name: "SmudgeKit",
-            swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [.linkedFramework("IOKit")]
         ),
         // eSCL and LEDM scan translation. No USB, so it tests without hardware.
         .target(
             name: "SmudgeScan",
-            dependencies: ["SmudgeKit"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            dependencies: ["SmudgeKit"]
         ),
-        // Per-user agent that serves attached HP scanners to Image Capture over loopback eSCL.
-        .executableTarget(
-            name: "smudge-scand",
-            dependencies: ["SmudgeKit", "SmudgeScan"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
-        ),
-        .executableTarget(
-            name: "Smudge",
-            dependencies: [
-                "CCups",
-                "SmudgeKit",
-                "SmudgeScan",
-                .product(name: "Sparkle", package: "Sparkle"),
-            ],
+        // Non-UI logic of the app: printer model, CUPS and LEDM controllers, parsing.
+        .target(
+            name: "SmudgeCore",
+            dependencies: ["CCups", "SmudgeKit", "SmudgeScan"],
             swiftSettings: [
-                .swiftLanguageMode(.v5),
                 // libcups is deprecated in the SDK but still works.
                 .unsafeFlags(["-Xcc", "-Wno-deprecated-declarations"]),
             ],
             linkerSettings: [
-                // Sparkle.framework lives in Contents/Frameworks of the app bundle.
-                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
                 .linkedFramework("IOKit"),
                 .linkedFramework("UserNotifications"),
             ]
         ),
+        // Per-user agent that serves attached HP scanners to Image Capture over loopback eSCL.
+        .executableTarget(
+            name: "smudge-scand",
+            dependencies: ["SmudgeKit", "SmudgeScan"]
+        ),
+        .executableTarget(
+            name: "Smudge",
+            dependencies: [
+                "SmudgeCore",
+                "SmudgeKit",
+                "SmudgeScan",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            linkerSettings: [
+                // Sparkle.framework lives in Contents/Frameworks of the app bundle.
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
+            ]
+        ),
         .testTarget(
             name: "SmudgeTests",
-            dependencies: ["Smudge", "SmudgeKit"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            dependencies: ["SmudgeCore", "SmudgeKit"]
         ),
         .testTarget(
             name: "SmudgeScanTests",
-            dependencies: ["SmudgeScan", "SmudgeKit"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            dependencies: ["SmudgeScan", "SmudgeKit"]
         ),
     ]
 )

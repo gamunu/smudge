@@ -4,9 +4,9 @@
 import Foundation
 import IOKit
 
-enum USBCheck {
+public enum USBCheck {
     /// Pulls the serial out of a usb:// device URI, if present.
-    static func serial(fromURI uri: String) -> String? {
+    public static func serial(fromURI uri: String) -> String? {
         DeviceURI.serial(uri)
     }
 

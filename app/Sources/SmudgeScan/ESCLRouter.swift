@@ -24,7 +24,7 @@ public struct RouterResponse {
 }
 
 /// eSCL for one scanner: method, path and body in, response out. Knows nothing about sockets.
-public final class ESCLRouter: @unchecked Sendable {
+public final class ESCLRouter: @unchecked Sendable {  // shared state is guarded by lock
     /// How long a finished job stays in the status list (the spec leaves this open).
     public static let finishedJobLifetime: TimeInterval = 300
     /// Age after which a page file in the work folder counts as left over from an earlier run.

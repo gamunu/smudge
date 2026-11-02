@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Gamunu Balagalla
 
 import SwiftUI
+import SmudgeCore
 
 /// The guided sheet for one maintenance task. Fixed size, instructions on the left and a big
 /// picture on the right, slim numbered progress at the top.
