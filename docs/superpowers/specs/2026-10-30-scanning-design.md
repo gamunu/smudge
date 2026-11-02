@@ -181,6 +181,10 @@ page on the glass:
   dpi it took 264 s (429379200 bytes) against 272 s. The probe peaked
   at 4.2 GB resident on the 1200 dpi raw page, against 84 MB for JPEG:
   the USB read loop does not release its buffers until it returns.
+- **After the TIFF stream and the read loop fix.** A 600 dpi raw
+  color page (107344800 bytes) downloaded with a 9.7 MB peak. Through
+  the installed agent, Image Capture's bar filled steadily during a
+  300 dpi scan, and the saved file was a valid 2516 x 3480 JPEG.
 
 ## Goals
 
