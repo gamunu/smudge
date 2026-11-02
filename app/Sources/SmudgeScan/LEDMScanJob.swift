@@ -61,12 +61,26 @@ public struct LEDMJobSnapshot: Equatable, Sendable {
     public var pageState: String?
     public var binaryURL: String?
     public var hasPreScanPage: Bool
+    /// Size of the page the printer is about to send, from the job document once the page is ready.
+    public var imageWidth: Int?
+    public var imageHeight: Int?
+    public var bytesPerLine: Int?
 
-    public init(jobState: String? = nil, pageState: String? = nil, binaryURL: String? = nil, hasPreScanPage: Bool = false) {
+    public init(jobState: String? = nil, pageState: String? = nil, binaryURL: String? = nil, hasPreScanPage: Bool = false,
+                imageWidth: Int? = nil, imageHeight: Int? = nil, bytesPerLine: Int? = nil) {
         self.jobState = jobState
         self.pageState = pageState
         self.binaryURL = binaryURL
         self.hasPreScanPage = hasPreScanPage
+        self.imageWidth = imageWidth
+        self.imageHeight = imageHeight
+        self.bytesPerLine = bytesPerLine
+    }
+
+    /// The page size when the document gives all three values.
+    public var geometry: PageGeometry? {
+        guard let imageWidth, let imageHeight, let bytesPerLine else { return nil }
+        return PageGeometry(width: imageWidth, height: imageHeight, bytesPerLine: bytesPerLine)
     }
 
     public static func parse(_ xml: Data) -> LEDMJobSnapshot {
@@ -78,6 +92,9 @@ public struct LEDMJobSnapshot: Equatable, Sendable {
             case "JobState": if s.jobState == nil { s.jobState = text }
             case "PageState": if s.pageState == nil { s.pageState = text }
             case "BinaryURL": if s.binaryURL == nil { s.binaryURL = text }
+            case "ImageWidth": if s.imageWidth == nil { s.imageWidth = Int(text) }
+            case "ImageHeight": if s.imageHeight == nil { s.imageHeight = Int(text) }
+            case "BytesPerLine": if s.bytesPerLine == nil { s.bytesPerLine = Int(text) }
             default: break
             }
         })

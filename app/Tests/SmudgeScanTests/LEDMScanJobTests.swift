@@ -24,12 +24,14 @@ final class LEDMScanJobTests: XCTestCase {
         XCTAssertEqual(s.jobState, "Processing"); XCTAssertEqual(s.pageState, "ReadyToUpload")
         XCTAssertEqual(s.binaryURL, "/Scan/Jobs/14/Pages/1"); XCTAssertTrue(s.hasPreScanPage)
         XCTAssertEqual(LEDMJobStep.next(s), .upload("/Scan/Jobs/14/Pages/1"))
+        XCTAssertEqual(s.imageWidth, 637); XCTAssertEqual(s.imageHeight, 877); XCTAssertEqual(s.bytesPerLine, 1911)
+        XCTAssertEqual(s.geometry, PageGeometry(width: 637, height: 877, bytesPerLine: 1911))
     }
 
     func testJobSnapshotWithoutPageHasNoPreScanPage() {
         let xml = "<j:Job xmlns:j=\"x\"><j:JobState>Completed</j:JobState></j:Job>"
         let s = LEDMJobSnapshot.parse(Data(xml.utf8))
-        XCTAssertFalse(s.hasPreScanPage); XCTAssertNil(s.pageState)
+        XCTAssertFalse(s.hasPreScanPage); XCTAssertNil(s.pageState); XCTAssertNil(s.geometry)
     }
 
     func testScannerState() {

@@ -39,7 +39,8 @@ final class LEDMScanDevice: ScanDevice, @unchecked Sendable {
         }
     }
 
-    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool) throws -> ScanOutcome {
+    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool,
+              onPageReady: @escaping @Sendable (PageGeometry) -> Void) throws -> ScanOutcome {
         try client.withSession { s in
             let log = self.log
             s.log = log
@@ -67,20 +68,24 @@ final class LEDMScanDevice: ScanDevice, @unchecked Sendable {
             defer { cancel() }
 
             var page = ""
+            var geometry: PageGeometry?
             var lastDoc = ""
             poll: while true {
                 if isCancelled() { cancel(); return .canceledByClient }
                 if Date().timeIntervalSince(started) > Self.jobDeadline { cancel(); throw LEDMError.timeout }
                 let r = try s.send(LEDMHTTP.scanGetRequest(jobURL), expectRoot: nil, timeout: 15)
                 if r.status == 200, r.text != lastDoc { lastDoc = r.text; log?(r.text) }
-                switch LEDMJobStep.next(LEDMJobSnapshot.parse(r.body)) {
+                let snapshot = LEDMJobSnapshot.parse(r.body)
+                switch LEDMJobStep.next(snapshot) {
                 case .wait: Thread.sleep(forTimeInterval: 0.5)
-                case .upload(let url): page = url; break poll
+                case .upload(let url): page = url; geometry = snapshot.geometry; break poll
                 case .finished(let outcome): ended = true; return outcome
                 }
             }
             lap("ReadyToUpload")
 
+            // A job document without the size gets the size a Raw scan of this request measures.
+            onPageReady(geometry ?? PageGeometry.expected(for: request))
             FileManager.default.createFile(atPath: file.path, contents: nil)
             let fh = try FileHandle(forWritingTo: file)
             defer { try? fh.close() }

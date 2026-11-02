@@ -298,13 +298,17 @@ printer
   `Content-Length` and streams an uncompressed baseline TIFF (one
   strip, header first, 8-bit gray or RGB) whose pixel rows are the
   printer's bytes as they arrive. The reply is labelled `image/jpeg`
-  because that is the format Image Capture asks for. Black and white
-  is streamed the same way as gray thresholded row by row into a 1-bit
-  TIFF. A stream that does not complete closes the connection early,
-  so the client sees an error. A job that ends canceled or failed mid-stream closes the
-  connection without the terminating chunk. Every other job waits up
-  to 20 s for the processed page, then replies `503` with
-  `Retry-After: 2` and no body, and the client asks again. A job
+  because that is the format Image Capture asks for. The size arrives
+  a few seconds after the POST, and the request is held until then.
+  When it has not arrived within 20 s the reply is `503` with
+  `Retry-After: 2`. Rows the printer pads past the width are dropped.
+  Black and white is streamed the same way as gray thresholded row by
+  row into a 1-bit TIFF. A job that ends canceled or failed, or whose
+  page comes up short, closes the connection before the declared
+  length is reached, so the client sees an error. Every other job
+  (sharpening, or PNG, TIFF or PDF output) waits up to 20 s for the
+  processed page, then replies `503` with `Retry-After: 2` and no
+  body, and the client asks again. A job
   counts as served once a `200` page response starts, never on a 503.
   A request while a stream is still running also gets 503.
 - `DELETE /eSCL/ScanJobs/<id>`: cancel the LEDM job if it is still
@@ -323,10 +327,10 @@ mapping:
 | X/YResolution | X/YResolution (must be a listed pair) |
 | ScanRegion Width/Height/X/YOffset (1/300 in) | Width/Height/XStart/YStart, same unit |
 | ColorMode RGB24 / Grayscale8 / BlackAndWhite1 | ColorSpace Color / Gray / Gray |
-| DocumentFormat image/jpeg | Format Jpeg (Color8, Gray8) |
+| DocumentFormat image/jpeg | Format Raw, streamed as a TIFF (Jpeg when sharpening is asked for) |
 | DocumentFormat image/png, image/tiff | Format Raw, encoded by the agent |
 | DocumentFormat application/pdf | Jpeg (Raw for black and white), wrapped in a one-page PDF by the agent |
-| BlackAndWhite1, any format | Gray, thresholded by the agent (1-bit PNG/TIFF/PDF; for JPEG, 8-bit gray) |
+| BlackAndWhite1, any format | Gray, thresholded by the agent (1-bit PNG/TIFF/PDF, and the streamed 1-bit TIFF for JPEG) |
 | Brightness, Contrast | ToneMap |
 | Sharpen | software |
 | Threshold | software threshold on Gray |

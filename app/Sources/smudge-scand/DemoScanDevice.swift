@@ -20,7 +20,8 @@ final class DemoScanDevice: ScanDevice, @unchecked Sendable {
 
     func scannerState() throws -> String { "Idle" }
 
-    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool) throws -> ScanOutcome {
+    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool,
+              onPageReady: @escaping @Sendable (PageGeometry) -> Void) throws -> ScanOutcome {
         let start = Date()
         /// Waits until `delay * fraction` seconds have passed since the scan began.
         func wait(until fraction: Double) -> Bool {
@@ -34,17 +35,25 @@ final class DemoScanDevice: ScanDevice, @unchecked Sendable {
         let w = request.width * request.resolution / 300, h = request.height * request.resolution / 300
         let channels = request.colorSpace == "Color" ? 3 : 1
         if request.format == .raw {
-            if !wait(until: 1) { return .canceledByClient }
+            // Like the printer, the page size is known first and the rows arrive over the scan, in 20 pieces.
+            if !wait(until: 0.05) { return .canceledByClient }
+            onPageReady(PageGeometry(width: w, height: h, bytesPerLine: w * channels))
             FileManager.default.createFile(atPath: file.path, contents: nil)
             let fh = try FileHandle(forWritingTo: file)
             defer { try? fh.close() }
-            for y in 0..<h {
-                var row = [UInt8](repeating: 0, count: w * channels)
-                for x in 0..<w {
-                    let v = UInt8((x * 255) / max(w - 1, 1))
-                    for c in 0..<channels { row[x * channels + c] = c == 0 ? v : UInt8((y * 255) / max(h - 1, 1)) }
+            let pieces = 20
+            for i in 0..<pieces {
+                if !wait(until: 0.05 + 0.95 * Double(i + 1) / Double(pieces)) { return .canceledByClient }
+                var data = Data(capacity: (h * (i + 1) / pieces - h * i / pieces) * w * channels)
+                for y in (h * i / pieces)..<(h * (i + 1) / pieces) {
+                    var row = [UInt8](repeating: 0, count: w * channels)
+                    for x in 0..<w {
+                        let v = UInt8((x * 255) / max(w - 1, 1))
+                        for c in 0..<channels { row[x * channels + c] = c == 0 ? v : UInt8((y * 255) / max(h - 1, 1)) }
+                    }
+                    data.append(contentsOf: row)
                 }
-                try fh.write(contentsOf: row)
+                try fh.write(contentsOf: data)
             }
             return .page(bytes: w * h * channels)
         }

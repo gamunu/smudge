@@ -33,10 +33,38 @@ final class ToneAndPlanTests: XCTestCase {
         XCTAssertEqual(p.post.rawLayout, RawLayout(width: 2550, height: 3300, channels: 1, rowBytes: 2550))
     }
 
-    func testPlannerJpegPassthrough() throws {
-        let s = ESCLScanSettings(resolution: 300, x: 0, y: 0, width: 2480, height: 3508, colorMode: .rgb24, format: .jpeg)
-        let p = ScanPlanner.plan(s, caps: try caps(), tone: .deskJet2300)
-        XCTAssertEqual(p.request.format, .jpeg); XCTAssertEqual(p.post, PostProcess())
+    func testPlannerJpegColorAndGrayStreamAsRawTIFF() throws {
+        let c = ScanPlanner.plan(ESCLScanSettings(resolution: 300, x: 0, y: 0, width: 2480, height: 3508, colorMode: .rgb24, format: .jpeg),
+                                 caps: try caps(), tone: .deskJet2300)
+        XCTAssertTrue(c.streamsTIFF)
+        XCTAssertEqual(c.request.format, .raw); XCTAssertEqual(c.request.colorSpace, "Color")
+        XCTAssertEqual(c.post.rawLayout, RawLayout(width: 2480, height: 3508, channels: 3, rowBytes: 7440))
+        let g = ScanPlanner.plan(ESCLScanSettings(resolution: 300, x: 0, y: 0, width: 2480, height: 3508, colorMode: .grayscale8, format: .jpeg,
+                                                  brightness: 1500, contrast: 400),
+                                 caps: try caps(), tone: .deskJet2300)
+        XCTAssertTrue(g.streamsTIFF)
+        XCTAssertEqual(g.request.format, .raw); XCTAssertEqual(g.request.colorSpace, "Gray")
+        XCTAssertEqual(g.request.brightness, 1500); XCTAssertEqual(g.request.contrast, 400)   // tone stays on the device
+    }
+
+    func testPlannerJpegBlackAndWhiteStreamsWithThreshold() throws {
+        let p = ScanPlanner.plan(ESCLScanSettings(resolution: 300, x: 0, y: 0, width: 2550, height: 3300, colorMode: .blackAndWhite1,
+                                                  format: .jpeg, threshold: 700),
+                                 caps: try caps(), tone: .deskJet2300)
+        XCTAssertTrue(p.streamsTIFF)
+        XCTAssertEqual(p.request.format, .raw); XCTAssertEqual(p.request.colorSpace, "Gray"); XCTAssertEqual(p.post.threshold, 700)
+    }
+
+    func testPlannerSharpenAndOtherFormatsKeepTheProcessedPath() throws {
+        let sharp = ScanPlanner.plan(ESCLScanSettings(resolution: 300, x: 0, y: 0, width: 100, height: 100, colorMode: .rgb24, format: .jpeg,
+                                                      sharpen: 1500),
+                                     caps: try caps(), tone: .deskJet2300)
+        XCTAssertFalse(sharp.streamsTIFF); XCTAssertEqual(sharp.request.format, .jpeg); XCTAssertEqual(sharp.post.sharpen, 1500)
+        for f in [ESCLFormat.png, .tiff, .pdf] {
+            let p = ScanPlanner.plan(ESCLScanSettings(resolution: 300, x: 0, y: 0, width: 100, height: 100, colorMode: .rgb24, format: f),
+                                     caps: try caps(), tone: .deskJet2300)
+            XCTAssertFalse(p.streamsTIFF, "\(f)")
+        }
     }
 
     func testPlannerPngAsksForRawColorAndScalesLayoutByResolution() throws {
@@ -116,18 +144,6 @@ final class ImagePipelineTests: XCTestCase {
         XCTAssertGreaterThan(pixels(try decode(bright)).reduce(0) { $0 + Int($1) }, pixels(try decode(base)).reduce(0) { $0 + Int($1) })
         let props = CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithURL(base as CFURL, nil)!, 0, nil) as? [CFString: Any]
         XCTAssertEqual(props?[kCGImagePropertyDPIWidth] as? Double, 600)
-    }
-
-    func testJpegWithNoPostStepsIsCopiedUntouched() throws {
-        let src = tmp("src.jpg")
-        let ctx = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-                            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-        let dest = CGImageDestinationCreateWithURL(src as CFURL, "public.jpeg" as CFString, 1, nil)!
-        CGImageDestinationAddImage(dest, ctx.makeImage()!, nil); XCTAssertTrue(CGImageDestinationFinalize(dest))
-        let req = LEDMScanRequest(resolution: 300, xStart: 0, yStart: 0, width: 8, height: 8, format: .jpeg, colorSpace: "Color", brightness: 1000, contrast: 1000)
-        let out = tmp("out.jpg")
-        try ImagePipeline.render(page: src, plan: ScanPlan(request: req, post: PostProcess(), output: .jpeg), resolution: 300, to: out)
-        XCTAssertEqual(try Data(contentsOf: out), try Data(contentsOf: src))
     }
 
     func testRawRgbToTiff() throws {

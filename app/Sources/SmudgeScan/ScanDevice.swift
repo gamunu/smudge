@@ -16,5 +16,7 @@ public protocol ScanDevice: AnyObject, Sendable {
     /// The LEDM ScannerState, "Idle" when ready. Throws when the scanner cannot be reached.
     func scannerState() throws -> String
     /// Runs one job and writes the page to `file`. `isCancelled` is polled while the job runs.
-    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool) throws -> ScanOutcome
+    /// `onPageReady` gets the page size when the printer has the page ready, before the download starts.
+    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool,
+              onPageReady: @escaping @Sendable (PageGeometry) -> Void) throws -> ScanOutcome
 }

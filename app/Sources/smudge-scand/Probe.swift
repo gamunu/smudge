@@ -46,7 +46,7 @@ func runProbe(value: @escaping (String) -> String?, flag: (String) -> Bool) -> N
             let name = "page" + (tag.map { "-" + $0 } ?? "") + "." + ext
             let out = outDir.appendingPathComponent(name)
             let t0 = Date()
-            let outcome = try dev.scan(req, to: out, isCancelled: { cancelled.value })
+            let outcome = try dev.scan(req, to: out, isCancelled: { cancelled.value }, onPageReady: { _ in })
             err("outcome: \(outcome) in \(Date().timeIntervalSince(t0))s -> \(out.path)")
             let state = try dev.scannerState()
             err("scanner state after: \(state)")

@@ -44,15 +44,16 @@ public struct ScanPlan: Equatable, Sendable {
     public var request: LEDMScanRequest
     public var post: PostProcess
     public var output: ESCLFormat
+    /// True when the page needs no whole-image work, so the printer's Raw rows go out as an uncompressed
+    /// TIFF while it scans.
+    public var streamsTIFF: Bool
 
-    public init(request: LEDMScanRequest, post: PostProcess, output: ESCLFormat) {
+    public init(request: LEDMScanRequest, post: PostProcess, output: ESCLFormat, streamsTIFF: Bool = false) {
         self.request = request
         self.post = post
         self.output = output
+        self.streamsTIFF = streamsTIFF
     }
-
-    /// True when the printer's JPEG is the final file, so it can be sent as it arrives.
-    public var isPassthrough: Bool { request.format == .jpeg && output == .jpeg && post == PostProcess() }
 }
 
 public enum ScanPlanner {
@@ -61,10 +62,6 @@ public enum ScanPlanner {
         let color = s.colorMode == .rgb24
         let bw = s.colorMode == .blackAndWhite1
         let type: LEDMColorType = color ? .color8 : .gray8
-        var format: LEDMFormat = (s.format == .png || s.format == .tiff || bw) ? .raw : .jpeg
-        // A color type that cannot do Raw falls back to Jpeg.
-        if format == .raw, !(caps.formats[type]?.contains(.raw) ?? false) { format = .jpeg }
-
         var post = PostProcess()
         if bw { post.threshold = s.threshold ?? 1000 }
         if let sh = s.sharpen, sh != 1000 { post.sharpen = sh }
@@ -78,6 +75,12 @@ public enum ScanPlanner {
             if let c = s.contrast, c != 1000 { post.softwareContrast = c }
         }
 
+        // A JPEG reply that needs no sharpening or software tone is streamed from a Raw scan.
+        let streams = s.format == .jpeg && post.sharpen == nil && post.softwareBrightness == nil && post.softwareContrast == nil
+        var format: LEDMFormat = (s.format == .png || s.format == .tiff || bw || streams) ? .raw : .jpeg
+        // A color type that cannot do Raw falls back to Jpeg.
+        if format == .raw, !(caps.formats[type]?.contains(.raw) ?? false) { format = .jpeg }
+
         if format == .raw {
             let px = s.width * s.resolution / 300
             let ch = color ? 3 : 1
@@ -85,7 +88,7 @@ public enum ScanPlanner {
         }
         let req = LEDMScanRequest(resolution: s.resolution, xStart: s.x, yStart: s.y, width: s.width, height: s.height,
                                   format: format, colorSpace: color ? "Color" : "Gray", brightness: brightness, contrast: contrast)
-        return ScanPlan(request: req, post: post, output: s.format)
+        return ScanPlan(request: req, post: post, output: s.format, streamsTIFF: streams && format == .raw)
     }
 }
 
@@ -115,11 +118,6 @@ public enum ImagePipeline {
     public static func render(page: URL, plan: ScanPlan, resolution: Int, to output: URL) throws {
         let post = plan.post
         let isRaw = plan.request.format == .raw
-        if plan.isPassthrough {
-            try? FileManager.default.removeItem(at: output)
-            try FileManager.default.copyItem(at: page, to: output)
-            return
-        }
 
         var mapped: MappedFile?
         var image: CGImage
@@ -202,7 +200,7 @@ public enum ImagePipeline {
     /// Black and white from a gray image. 1000 is the middle, 128. `oneBit` gives a 1-bit image, else
     /// 8-bit gray with only 0 and 255.
     private static func threshold(_ image: CGImage, level: Int, rawGray: MappedFile?, oneBit: Bool) throws -> CGImage {
-        let cut = UInt8(min(min(max(level, 0), 2000) * 256 / 2000, 255))
+        let cut = thresholdCut(level)
         let w = image.width, h = image.height
         // Gray source rows: the mapped page when it is raw 8-bit gray, else a gray redraw of the image.
         var redraw: [UInt8] = []
@@ -222,6 +220,9 @@ public enum ImagePipeline {
         }
         return try cut1(rows, stride: stride, w: w, h: h, cut: cut, oneBit: oneBit)
     }
+
+    /// The gray value at or above which a pixel is white. eSCL's 0...2000 maps onto 0...255, 1000 to 128.
+    static func thresholdCut(_ level: Int) -> UInt8 { UInt8(min(min(max(level, 0), 2000) * 256 / 2000, 255)) }
 
     private static func cut1(_ rows: UnsafePointer<UInt8>, stride: Int, w: Int, h: Int, cut: UInt8, oneBit: Bool) throws -> CGImage {
         let space = CGColorSpaceCreateDeviceGray()

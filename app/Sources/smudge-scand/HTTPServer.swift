@@ -181,7 +181,7 @@ private final class HTTPConnection {
             sendFile(url, type: type, status: res.status, headers: headers, keepAlive: req.keepAlive)
         case .stream(let stream):
             headers["Content-Type"] = stream.contentType
-            headers["Transfer-Encoding"] = "chunked"
+            headers["Content-Length"] = "\(stream.totalLength)"
             send(head(res.status, headers, keepAlive: req.keepAlive)) { [weak self] in self?.pump(stream, keepAlive: req.keepAlive) }
         }
     }
@@ -200,8 +200,8 @@ private final class HTTPConnection {
         })
     }
 
-    /// Sends the stream's bytes as they appear. A stream that fails ends the connection without the
-    /// terminating chunk, so the client sees an error instead of a short file.
+    /// Sends the stream's bytes as they appear. A stream that fails ends the connection short of the
+    /// Content-Length, so the client sees an error instead of a truncated file.
     private func pump(_ stream: PageStream, keepAlive: Bool) {
         DispatchQueue.global().async { [weak self] in
             let step = stream.next(limit: Self.chunkSize)
@@ -209,13 +209,10 @@ private final class HTTPConnection {
                 guard let self else { return }
                 switch step {
                 case .data(let data):
-                    var out = Data("\(String(data.count, radix: 16))\r\n".utf8)
-                    out.append(data)
-                    out.append(Data("\r\n".utf8))
-                    self.send(out) { self.pump(stream, keepAlive: keepAlive) }
+                    self.send(data) { self.pump(stream, keepAlive: keepAlive) }
                 case .end:
                     stream.close()
-                    self.send(Data("0\r\n\r\n".utf8), then: self.finish(keepAlive))
+                    self.finish(keepAlive)()
                 case .failed:
                     stream.close()
                     self.close()

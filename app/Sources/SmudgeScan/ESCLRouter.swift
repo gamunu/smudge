@@ -8,7 +8,7 @@ public struct RouterResponse {
         case none
         case data(Data)
         case file(URL, contentType: String)
-        /// The printer's JPEG, sent as it arrives.
+        /// A TIFF of known length, sent as the printer scans it.
         case stream(PageStream)
     }
 
@@ -194,12 +194,13 @@ public final class ESCLRouter: @unchecked Sendable {
         var completed = 0
         var keep: URL?
         do {
-            let outcome = try device.scan(job.plan.request, to: raw, isCancelled: { job.cancelled })
+            let outcome = try device.scan(job.plan.request, to: raw, isCancelled: { job.cancelled },
+                                          onPageReady: { job.waiter.setGeometry($0) })
             switch outcome {
             case .page:
                 if job.cancelled {
                     state = .canceled; result = .noMorePages
-                } else if job.plan.isPassthrough {
+                } else if job.plan.streamsTIFF {
                     keep = raw
                     state = .completed; completed = 1
                     result = .file(raw, contentType: job.plan.output.rawValue)
@@ -232,25 +233,21 @@ public final class ESCLRouter: @unchecked Sendable {
         idle.lock(); idle.broadcast(); idle.unlock()
     }
 
-    /// Passthrough jobs answer at once and stream the page while the printer writes it, because Image
-    /// Capture drops a response that stays silent for about a minute. Other jobs wait for the page and
-    /// ask the client to retry when it takes too long. The job counts as served once a page response starts.
+    /// A streamed job answers as soon as the printer reports the page size and sends the TIFF while the
+    /// printer scans, because Image Capture drops a response that stays silent for about a minute. Other
+    /// jobs wait for the page and ask the client to retry when it takes too long. The job counts as served
+    /// once a page response starts.
     private func nextDocument(_ id: Int?) -> RouterResponse {
         lock.lock()
         guard let id, let job = jobs.job(id) else { lock.unlock(); return notFound() }
-        let passthrough = job.plan.isPassthrough
+        let streams = job.plan.streamsTIFF
         if job.nextDocumentServed {
-            let streaming = passthrough && job.waiter.current == nil
+            let streaming = streams && job.waiter.current == nil
             lock.unlock()
             return streaming ? retryLater() : notFound()
         }
-        if passthrough, job.waiter.current == nil {
-            job.nextDocumentServed = true
-            lock.unlock()
-            return RouterResponse(status: 200, body: .stream(PageStream(file: pageFile(job),
-                                                                       contentType: job.plan.output.rawValue, waiter: job.waiter)))
-        }
         lock.unlock()
+        if streams { return streamedDocument(job) }
 
         guard let result = job.waiter.wait(timeout: pageWait) else { return retryLater() }
         lock.lock(); defer { lock.unlock() }
@@ -258,11 +255,30 @@ public final class ESCLRouter: @unchecked Sendable {
         switch result {
         case .file(let url, let type):
             job.nextDocumentServed = true
-            if passthrough { return RouterResponse(status: 200, body: .stream(PageStream(file: url, contentType: type, waiter: job.waiter))) }
             return RouterResponse(status: 200, body: .file(url, contentType: type))
         case .noMorePages: return notFound()
         case .failed: return RouterResponse(status: 500)
         }
+    }
+
+    private func streamedDocument(_ job: ScanJobRecord) -> RouterResponse {
+        let geometry: PageGeometry
+        switch job.waiter.waitForGeometry(timeout: pageWait) {
+        case .ready(let g): geometry = g
+        case .ended(.noMorePages): return notFound()
+        case .ended: return RouterResponse(status: 500)
+        case .timedOut: return retryLater()
+        }
+        let channels = job.plan.request.colorSpace == "Color" ? 3 : 1
+        guard geometry.width > 0, geometry.height > 0, geometry.bytesPerLine >= geometry.width * channels else {
+            return RouterResponse(status: 500)
+        }
+        lock.lock(); defer { lock.unlock() }
+        if job.nextDocumentServed { return job.waiter.current == nil ? retryLater() : notFound() }
+        job.nextDocumentServed = true
+        let layout = TIFFLayout(geometry: geometry, channels: channels, dpi: job.resolution, threshold: job.plan.post.threshold)
+        return RouterResponse(status: 200, body: .stream(PageStream(file: pageFile(job), layout: layout,
+                                                                   contentType: job.plan.output.rawValue, waiter: job.waiter)))
     }
 
     private func retryLater() -> RouterResponse { RouterResponse(status: 503, headers: ["Retry-After": "2"]) }

@@ -7,7 +7,8 @@ import ImageIO
 @testable import SmudgeScan
 
 /// A scanner that blocks inside `scan` until released, writes a small JPEG and records cancels.
-/// With `pieces` set it instead creates the file at once and appends one piece per `step()`.
+/// With `pieces` set it instead creates the file on the first `step()` and appends one piece per `step()`.
+/// It reports the page size when the scan starts, `geometry` or else what a Raw scan of the request measures.
 final class FakeScanDevice: ScanDevice, @unchecked Sendable {
     let caps: LEDMScanCaps
     private let lock = NSLock()
@@ -20,6 +21,8 @@ final class FakeScanDevice: ScanDevice, @unchecked Sendable {
     var outcome: ScanOutcome?
     var autoRelease = false
     var pieces: [Data]?
+    var geometry: PageGeometry?
+    var reportsGeometry = true
     private let stepGate = DispatchSemaphore(value: 0)
 
     init(caps: LEDMScanCaps) { self.caps = caps }
@@ -33,8 +36,10 @@ final class FakeScanDevice: ScanDevice, @unchecked Sendable {
         return state
     }
 
-    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool) throws -> ScanOutcome {
+    func scan(_ request: LEDMScanRequest, to file: URL, isCancelled: @escaping @Sendable () -> Bool,
+              onPageReady: @escaping @Sendable (PageGeometry) -> Void) throws -> ScanOutcome {
         lock.lock(); scans += 1; lock.unlock()
+        if reportsGeometry { onPageReady(geometry ?? PageGeometry.expected(for: request)) }
         if let pieces {
             // Like the printer, the page file only appears once the first data is ready.
             var fh: FileHandle?
@@ -114,60 +119,148 @@ final class ESCLRouterTests: XCTestCase {
         r.handle(method: "POST", path: "/eSCL/ScanJobs", body: body)
     }
 
-    func testHappyPathMatchesSpikeSequence() throws {
+    /// Settings for a small page: 8 x 8 pixels at 300 dpi unless `width` says otherwise.
+    private func settings(color: String = "RGB24", format: String = "image/jpeg", width: Int = 8, extra: String = "") -> Data {
+        let xml = String(decoding: ScanFixtures.imageCaptureSettings, as: UTF8.self)
+            .replacingOccurrences(of: "<pwg:Width>2480", with: "<pwg:Width>\(width)")
+            .replacingOccurrences(of: "<pwg:Height>3508", with: "<pwg:Height>8")
+            .replacingOccurrences(of: "<scan:ColorMode>RGB24", with: "<scan:ColorMode>\(color)")
+            .replacingOccurrences(of: "image/jpeg", with: format)
+            .replacingOccurrences(of: "</scan:ScanSettings>", with: extra + "</scan:ScanSettings>")
+        return Data(xml.utf8)
+    }
+
+    /// Bytes of a color page of `rows` rows, 8 pixels wide: every byte is the row number.
+    private func colorRows(_ rows: Range<Int>) -> Data { Data(rows.flatMap { y in [UInt8](repeating: UInt8(y), count: 24) }) }
+
+    /// Reads until `count` bytes have arrived.
+    private func read(_ s: PageStream, _ count: Int) -> Data {
+        var got = Data()
+        while got.count < count {
+            guard case .data(let d) = s.next() else { break }
+            got.append(d)
+        }
+        return got
+    }
+
+    private func decode(_ data: Data) throws -> (CGImage, [CFString: Any]) {
+        let src = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        return (try XCTUnwrap(CGImageSourceCreateImageAtIndex(src, 0, nil)),
+                CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] ?? [:])
+    }
+
+    func testStreamedColorJobHasItsLengthBeforeAnyPixelsThenStreamsRows() throws {
         let (r, dev) = try makeRouter()
-        XCTAssertEqual(get(r, "/eSCL/ScannerCapabilities").status, 200)
-        let p = post(r)
-        XCTAssertEqual(p.status, 201); XCTAssertEqual(p.headers["Location"], "/eSCL/ScanJobs/1")
+        dev.pieces = (0..<4).map { colorRows(($0 * 2)..<($0 * 2 + 2)) }
+        XCTAssertEqual(post(r, settings()).status, 201)
         XCTAssertTrue(text(get(r, "/eSCL/ScannerStatus")).contains("<pwg:JobUri>/eSCL/ScanJobs/1</pwg:JobUri>"))
-        let s = try XCTUnwrap(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
+        let res = get(r, "/eSCL/ScanJobs/1/NextDocument")
+        XCTAssertEqual(res.status, 200)
+        let s = try XCTUnwrap(stream(res))
         XCTAssertEqual(s.contentType, "image/jpeg")
-        dev.release()
-        let (bytes, end) = drain(s)
-        XCTAssertEqual(end, .end)
-        XCTAssertEqual(bytes, FakeScanDevice.jpeg())
+        // 8 + 2 + 13 entries of 12 + 4 + 6 (bits) + 16 (resolution) = 192 bytes of header, then 8 x 8 x 3.
+        XCTAssertEqual(s.totalLength, 192 + 8 * 8 * 3)
+        guard case .data(let head) = s.next() else { return XCTFail() }
+        XCTAssertEqual(head.count, 192)
+
+        var got = head
+        for i in 0..<4 {
+            dev.step()
+            let piece = read(s, 48)
+            XCTAssertEqual(piece, colorRows((i * 2)..<(i * 2 + 2)))
+            got.append(piece)
+        }
+        XCTAssertEqual(s.next(), .end)
+        XCTAssertEqual(got.count, s.totalLength)
+        let (img, props) = try decode(got)
+        XCTAssertEqual(img.width, 8); XCTAssertEqual(img.height, 8)
+        XCTAssertEqual(props[kCGImagePropertyDPIWidth] as? Double, 300)
+        r.waitUntilIdle()
         XCTAssertEqual(get(r, "/eSCL/ScanJobs/1/NextDocument").status, 404)
         XCTAssertEqual(r.handle(method: "DELETE", path: "/eSCL/ScanJobs/1", body: Data()).status, 200)
         XCTAssertTrue(text(get(r, "/eSCL/ScannerStatus")).contains("<pwg:JobState>Completed</pwg:JobState>"))
     }
 
-    func testPassthroughStreamsPiecesInOrder() throws {
-        let (r, dev) = try makeRouter()
-        let pieces = (0..<4).map { Data(repeating: UInt8($0 + 1), count: 1000 * ($0 + 1)) }
-        dev.pieces = pieces
-        _ = post(r)
-        let res = get(r, "/eSCL/ScanJobs/1/NextDocument")
-        XCTAssertEqual(res.status, 200)
-        let s = try XCTUnwrap(stream(res))
-        var got = Data()
-        for piece in pieces {
-            dev.step()
-            while got.count < (pieces.prefix(while: { $0 != piece }).reduce(0) { $0 + $1.count }) + piece.count {
-                guard case .data(let d) = s.next() else { return XCTFail() }
-                got.append(d)
-            }
+    func testStreamedJobAsksTheDeviceForRawColorOrGray() throws {
+        let caps = try XCTUnwrap(LEDMScanCaps.parse(Data(ScanFixtures.scanCaps2336.utf8)))
+        func plan(_ color: String) throws -> ScanPlan {
+            let parsed = try XCTUnwrap(ESCLScanSettings.parse(settings(color: color)))
+            return ScanPlanner.plan(try parsed.validated(against: caps), caps: caps, tone: .deskJet2300)
         }
-        r.waitUntilIdle()
+        let c = try plan("RGB24"), g = try plan("Grayscale8")
+        XCTAssertTrue(c.streamsTIFF); XCTAssertEqual(c.request.format, .raw); XCTAssertEqual(c.request.colorSpace, "Color")
+        XCTAssertTrue(g.streamsTIFF); XCTAssertEqual(g.request.format, .raw); XCTAssertEqual(g.request.colorSpace, "Gray")
+    }
+
+    func testStreamedBlackAndWhiteIsOneBitWithWhiteStayingWhite() throws {
+        let (r, dev) = try makeRouter()
+        // 16 x 8: the top four rows are paper white, the bottom four black.
+        let white = Data(repeating: 255, count: 16 * 4), black = Data(repeating: 0, count: 16 * 4)
+        dev.pieces = [white, black]
+        XCTAssertEqual(post(r, settings(color: "BlackAndWhite1", width: 16)).status, 201)
+        let s = try XCTUnwrap(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
+        // No bits array for 1-bit pages: 170 + 16 bytes of header, then 2 bytes per row.
+        XCTAssertEqual(s.totalLength, 186 + 2 * 8)
+        dev.step(); dev.step()
+        let got = read(s, s.totalLength)
         XCTAssertEqual(s.next(), .end)
-        XCTAssertEqual(got, pieces.reduce(Data(), +))
-        XCTAssertEqual(get(r, "/eSCL/ScanJobs/1/NextDocument").status, 404)
+        XCTAssertEqual(got.count, s.totalLength)
+        let (img, props) = try decode(got)
+        XCTAssertEqual(tiffValue(got, tag: 258), 1)   // 1 bit per sample in the file itself
+        var out = [UInt8](repeating: 9, count: 16 * 8)
+        let ctx = CGContext(data: &out, width: 16, height: 8, bitsPerComponent: 8, bytesPerRow: 16,
+                            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: 16, height: 8))
+        XCTAssertEqual(Array(out[0..<64]), [UInt8](repeating: 255, count: 64))
+        XCTAssertEqual(Array(out[64..<128]), [UInt8](repeating: 0, count: 64))
+        r.waitUntilIdle()
+    }
+
+    func testRowPaddingFromThePrinterIsStrippedFromTheStream() throws {
+        let (r, dev) = try makeRouter()
+        dev.geometry = PageGeometry(width: 8, height: 8, bytesPerLine: 28)
+        let padded = Data((0..<8).flatMap { y in [UInt8](repeating: UInt8(y), count: 24) + [UInt8](repeating: 0xEE, count: 4) })
+        dev.pieces = [padded.prefix(100), padded.dropFirst(100)]
+        _ = post(r, settings())
+        let s = try XCTUnwrap(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
+        XCTAssertEqual(s.totalLength, 192 + 8 * 8 * 3)
+        _ = s.next()
+        dev.step(); dev.step()
+        XCTAssertEqual(read(s, 8 * 8 * 3), colorRows(0..<8))
+        XCTAssertEqual(s.next(), .end)
+        r.waitUntilIdle()
+    }
+
+    func testStreamedJobWithoutPageSizeIs503() throws {
+        let (r, dev) = try makeRouter(pageWait: 0.05)
+        dev.reportsGeometry = false
+        dev.pieces = [colorRows(0..<8)]
+        _ = post(r, settings())
+        let res = get(r, "/eSCL/ScanJobs/1/NextDocument")
+        XCTAssertEqual(res.status, 503)
+        XCTAssertEqual(res.headers["Retry-After"], "2")
+        XCTAssertEqual(r.handle(method: "DELETE", path: "/eSCL/ScanJobs/1", body: Data()).status, 200)
+        r.waitUntilIdle()
+        // A 503 does not serve the job.
+        XCTAssertNotEqual(get(r, "/eSCL/ScanJobs/1/NextDocument").status, 200)
     }
 
     func testStreamNeverReadsAPageLeftByAnEarlierRun() throws {
         // Job ids start at 1 in every agent run, and finished pages stay in the work folder.
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("router-" + UUID().uuidString)
         let (old, oldDev) = try makeRouter(dir: dir)
-        oldDev.pieces = [Data(repeating: 0xEE, count: 5000)]
-        _ = post(old)
+        oldDev.pieces = [Data(repeating: 0xEE, count: 8 * 8 * 3)]
+        _ = post(old, settings())
         let first = try XCTUnwrap(stream(get(old, "/eSCL/ScanJobs/1/NextDocument")))
         oldDev.step(); old.waitUntilIdle()
         while case .data = first.next() {}
 
         let (r, dev) = try makeRouter(dir: dir)
-        let fresh = Data(repeating: 0x11, count: 300)
+        let fresh = Data(repeating: 0x11, count: 8 * 8 * 3)
         dev.pieces = [fresh]
-        _ = post(r)
+        _ = post(r, settings())
         let s = try XCTUnwrap(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
+        _ = s.next()
         // Start reading before the printer has sent anything, as Image Capture does.
         let got = Box()
         let done = expectation(description: "stream read")
@@ -183,8 +276,8 @@ final class ESCLRouterTests: XCTestCase {
 
     func testSecondNextDocumentWhileStreamingIs503() throws {
         let (r, dev) = try makeRouter()
-        dev.pieces = [Data(repeating: 1, count: 10)]
-        _ = post(r)
+        dev.pieces = [colorRows(0..<8)]
+        _ = post(r, settings())
         XCTAssertNotNil(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
         let again = get(r, "/eSCL/ScanJobs/1/NextDocument")
         XCTAssertEqual(again.status, 503)
@@ -195,13 +288,37 @@ final class ESCLRouterTests: XCTestCase {
 
     func testCancelMidStreamEndsStreamAsFailed() throws {
         let (r, dev) = try makeRouter()
-        dev.pieces = [Data(repeating: 1, count: 100), Data(repeating: 2, count: 100)]
-        _ = post(r)
+        dev.pieces = [colorRows(0..<4), colorRows(4..<8)]
+        _ = post(r, settings())
         let s = try XCTUnwrap(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
+        guard case .data = s.next() else { return XCTFail() }
         dev.step()
-        XCTAssertEqual(s.next(), .data(Data(repeating: 1, count: 100)))
+        XCTAssertEqual(s.next(), .data(colorRows(0..<4)))
         XCTAssertEqual(r.handle(method: "DELETE", path: "/eSCL/ScanJobs/1", body: Data()).status, 200)
         XCTAssertEqual(s.next(), .failed)
+        r.waitUntilIdle()
+        XCTAssertTrue(text(get(r, "/eSCL/ScannerStatus")).contains("<pwg:JobState>Canceled</pwg:JobState>"))
+    }
+
+    func testShortPageEndsStreamAsFailed() throws {
+        let (r, dev) = try makeRouter()
+        dev.pieces = [colorRows(0..<4)]
+        _ = post(r, settings())
+        let s = try XCTUnwrap(stream(get(r, "/eSCL/ScanJobs/1/NextDocument")))
+        _ = s.next()
+        dev.step(); r.waitUntilIdle()
+        // The printer delivered half the page and the job ended: the stream must not end cleanly.
+        XCTAssertEqual(s.next(), .data(colorRows(0..<4)))
+        XCTAssertEqual(s.next(), .failed)
+    }
+
+    func testPngJobIsProcessedNotStreamed() throws {
+        let (r, dev) = try makeRouter(pageWait: 0.05)
+        XCTAssertEqual(post(r, settings(format: "image/png")).status, 201)
+        XCTAssertEqual(get(r, "/eSCL/ScanJobs/1/NextDocument").status, 503)
+        XCTAssertEqual(r.handle(method: "DELETE", path: "/eSCL/ScanJobs/1", body: Data()).status, 200)
+        r.waitUntilIdle()
+        XCTAssertEqual(dev.cancels, 1)
     }
 
     func testProcessedJobNotReadyIs503ThenFileThen404() throws {
@@ -273,7 +390,7 @@ final class ESCLRouterTests: XCTestCase {
 
     func testDeviceFailureAbortsJobAndFreesScanner() throws {
         let (r, dev) = try makeRouter()
-        dev.failure = NSError(domain: "usb", code: 1); dev.autoRelease = true
+        dev.failure = NSError(domain: "usb", code: 1); dev.autoRelease = true; dev.reportsGeometry = false
         XCTAssertEqual(post(r).status, 201)
         r.waitUntilIdle()
         XCTAssertTrue(text(get(r, "/eSCL/ScannerStatus")).contains("<pwg:JobState>Aborted</pwg:JobState>"))
@@ -285,7 +402,7 @@ final class ESCLRouterTests: XCTestCase {
 
     func testNoDocumentEndsWithNoMorePages() throws {
         let (r, dev) = try makeRouter()
-        dev.outcome = .noDocument; dev.autoRelease = true
+        dev.outcome = .noDocument; dev.autoRelease = true; dev.reportsGeometry = false
         _ = post(r); r.waitUntilIdle()
         XCTAssertEqual(get(r, "/eSCL/ScanJobs/1/NextDocument").status, 404)
     }
