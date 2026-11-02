@@ -22,3 +22,40 @@ Local changes to upstream sources:
   the unload_library() call in the destructor are gone, and compressBuf is
   allocated at twice the raw size plus 4096 bytes so a JBIG stream that is
   larger than its input still fits.
+- HPCupsFilter.cpp copies the job user name and title through
+  copyJobField(), which replaces control characters, '"' and '\' (and '/'
+  in the user name) with '_'. Both values come from the job submitter and
+  go into quoted PJL strings and temp file names. The temp file names in
+  HPCupsFilter.cpp and SystemServices.cpp use snprintf instead of sprintf.
+- Hbpl1_Wrapper.cpp zero-initializes the PCLm page and user settings in
+  StartPage() and sets srcColorSpaceSpefication to deviceRGB. Upstream left
+  them uninitialized, and genPCLm.cpp read the source colour space from
+  stack garbage (UndefinedBehaviorSanitizer, found by tests/fuzz).
+- Mode9.cpp and Mode3.cpp test the byte count before reading the next byte
+  in their run scans, so the last byte of a row no longer reads one past the
+  row buffer (AddressSanitizer, found by make asan).
+- Mode10.cpp does the short-delta shift on unsigned values, and keeps the
+  end-of-row sentinel to 24 bits so it cannot equal its neighbour and run
+  the pixel scans off the row (UndefinedBehaviorSanitizer and tests/fuzz).
+- ColorMatcher.cpp allocates 8 extra bytes after the contone planes. The
+  halftoner pads each row to a multiple of 8 pixels and read that far past
+  the buffer.
+- Job.cpp rounds the unpacked black raster up to a multiple of 8 pixels,
+  which unpackBits() writes.
+- LJZjStream.cpp and LJZxStream.cpp copy the HPLJZjsJbgEncSt that follows
+  the JBIG data into a local struct instead of reading it through an
+  unaligned pointer.
+- ModeJpeg.cpp declares output_buffer_callback with a size_t size, as
+  jdatadbf.c calls it (call through a mismatched function type).
+- ModeJbig.cpp refuses a page buffer over 512 MB. The ZjColor2 page height
+  comes from the job and the size was computed in int.
+- Lidil.cpp checks cupsInteger1 and cupsInteger2 before indexing the 5 x 5
+  print mode maps.
+- Hbpl1.cpp skips the remaining strips in FormFeed() when no strip buffer
+  was allocated (a page with no raster rows).
+- HPCupsFilter.cpp checks each page header before use (headerIsSane():
+  colour space, enum fields, width, bits per pixel, bytes per line, page
+  size and resolution ranges, and that later pages match the first), checks
+  that the hbpl1 printable area fits the page and the read buffer, and
+  stops the job when cupsRasterReadPixels() runs out of data. Found by
+  tests/fuzz; upstream trusted every header field.

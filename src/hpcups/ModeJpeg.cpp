@@ -214,10 +214,10 @@ bool ModeJpeg::NextOutputRaster (RASTERDATA &next_raster)
     return true;
 }
 
-static void output_buffer_callback (JOCTET *outbuf, BYTE *buffer, int size)
+static void output_buffer_callback (JOCTET *outbuf, BYTE *buffer, size_t size)
 {
     ModeJpeg    *pModeJpeg = (ModeJpeg *) outbuf;
-    pModeJpeg->StoreJpegData (buffer, size);
+    pModeJpeg->StoreJpegData (buffer, (int) size);
 }
 
 void ModeJpeg::StoreJpegData (BYTE *buffer, int iSize)

@@ -197,7 +197,8 @@ DRIVER_ERROR Hbpl1::FormFeed ()
 		memset(m_pbyStripData,0xFF,m_nStripSize);
 	}
 
-	while(m_nBandCount < m_numStrips)
+	// No strip buffer yet means the page had no raster rows.
+	while(m_pbyStripData && m_nBandCount < m_numStrips)
 	{
 		++m_nBandCount;
 		m_pHbpl1Wrapper->Encapsulate(m_pbyStripData, m_nStripSize, m_nStripHeight, (void**)&m_pOutBuffer, &m_OutBuffSize);

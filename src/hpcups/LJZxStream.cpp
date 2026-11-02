@@ -200,7 +200,10 @@ DRIVER_ERROR    LJZxStream::Encapsulate (RASTERDATA *raster, bool bLastPlane)
     DRIVER_ERROR        err = NO_ERROR;
     BYTE                szStr[128];
     int                 i = 0;
-    HPLJZjsJbgEncSt     *se = (HPLJZjsJbgEncSt *) (raster->rasterdata[COLORTYPE_COLOR] + raster->rastersize[COLORTYPE_COLOR]);
+    // The encoder state sits unaligned after the data, so copy it out.
+    HPLJZjsJbgEncSt     seCopy;
+    memcpy (&seCopy, raster->rasterdata[COLORTYPE_COLOR] + raster->rastersize[COLORTYPE_COLOR], sizeof (seCopy));
+    HPLJZjsJbgEncSt     *se = &seCopy;
 
 /*
  *  Send JBIG header info

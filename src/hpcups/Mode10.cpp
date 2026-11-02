@@ -106,7 +106,7 @@ unsigned short Mode10::ShortDelta (uint32_t lastPixel, uint32_t lastUpperPixel)
 
     if ((dr <= 15) && (dr >= -16) && (dg <= 15) && (dg >= -16) && (db <= 30) && (db >= -32))
     {   // Note db is divided by 2 to double it's range from -16..15 to -32..30
-        result = ((dr << 10) & 0x007C00) | (((dg << 5) & 0x0003E0) | ((db >> 1) & 0x01F) | 0x8000);   // set upper bit to signify short delta
+        result = (int) ((((unsigned) dr << 10) & 0x007C00) | ((((unsigned) dg << 5) & 0x0003E0) | ((db >> 1) & 0x01F) | 0x8000));   // set upper bit to signify short delta
     }
     else
     {
@@ -164,7 +164,11 @@ This function compresses a single row per call.
     while ((getPixel (curRowPtr, lastPixel - 1) == newLastPixel) ||
            (getPixel (seedRowPtr, lastPixel) == newLastPixel))
     {
-        putPixel (curRowPtr, lastPixel, newLastPixel += 0x100); // add one to green.
+        // Add one to green. Keep the value to 24 bits: putPixel() drops the rest
+        // and the compare above must see what was stored, or the sentinel can
+        // equal its neighbour and the scans below run off the row.
+        newLastPixel = (newLastPixel + 0x100) & kWhite;
+        putPixel (curRowPtr, lastPixel, newLastPixel);
     }
     unsigned int curPixel = 0;
     unsigned int seedRowPixelCopyCount;

@@ -100,9 +100,11 @@ DRIVER_ERROR Hbpl1Wrapper::EndJob(void **pOutBuffer, int *pOutBufferSize)
 DRIVER_ERROR Hbpl1Wrapper::StartPage(void **pOutBuffer, int *pOutBufferSize)
 {
     DRIVER_ERROR    err = NO_ERROR;
-    PCLmPageSetup PCLmPageContent;
-    PCLmSUserSettingsType  PCLmSSettings;
-    PCLmSSetup PCLmSContent;
+    // Zeroed: upstream left most fields unset, and genPCLm read
+    // srcColorSpaceSpefication and other fields from uninitialized stack.
+    PCLmPageSetup PCLmPageContent = {};
+    PCLmSUserSettingsType  PCLmSSettings = {};
+    PCLmSSetup PCLmSContent = {};
     PCLmSContent.PCLmPageContent = &PCLmPageContent;
     PCLmSContent.PCLmSUserSettings = &PCLmSSettings;
     PCLmPageContent.mediaHeight = o_Hbpl1->m_JA.media_attributes.physical_height;
@@ -113,6 +115,8 @@ DRIVER_ERROR Hbpl1Wrapper::StartPage(void **pOutBuffer, int *pOutBufferSize)
     PCLmPageContent.sourceHeight = o_Hbpl1->m_JA.media_attributes.printable_height;
     PCLmPageContent.stripHeight = o_Hbpl1->m_nStripHeight;
     PCLmPageContent.compTypeRequested = compressFlate;
+    // Hbpl1 hands over RGB strips (m_nStripSize is 3 bytes per pixel).
+    PCLmPageContent.srcColorSpaceSpefication = deviceRGB;
     strncpy(PCLmPageContent.mediaSizeName, o_Hbpl1->m_JA.media_attributes.PageSizeName, sizeof(PCLmPageContent.mediaSizeName)-1);
     strncpy(PCLmSSettings.userMediaType, o_Hbpl1->m_JA.media_attributes.MediaTypeName, sizeof(PCLmSSettings.userMediaType)-1);
     PCLmSSettings.userInputBin = (jobInputBin)o_Hbpl1->m_JA.media_source;

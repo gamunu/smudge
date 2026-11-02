@@ -143,6 +143,13 @@ DRIVER_ERROR ModeJbig::Init(int iLastRaster, int iPlanes, int iBPP, ZJPLATFORM z
         } 
     }
 
+    // The page height comes from the job, so check the size before the int
+    // math below. 512 MB is far above any real page.
+    if (m_iWidth <= 0 || m_iLastRaster <= 0 || m_iPlanes <= 0 || m_iBPP <= 0 ||
+        (long long) m_iWidth * m_iLastRaster * m_iPlanes * m_iBPP > (1LL << 29))
+    {
+        return ALLOCMEM_ERROR;
+    }
     int    buffer_size = m_iWidth * m_iLastRaster * m_iPlanes * m_iBPP;
     m_pszInputRasterData = new BYTE[buffer_size];
     if (m_pszInputRasterData == NULL)

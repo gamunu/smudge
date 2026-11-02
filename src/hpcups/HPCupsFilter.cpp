@@ -36,15 +36,37 @@
 #include "ImageProcessor.h"
 #endif
 
+#include <math.h>
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/utsname.h>
 #include <time.h>
 #include "hplip_utils.h"
 
+#define MAX_RASTER_WIDTH 131072
+
 #define HP_FILE_VERSION_STR    "03.09.08.0"
 
 static HPCupsFilter    filter;
+
+/*
+ * Copy a job field from the command line. The user name and title come from
+ * whoever submitted the job, possibly over the network. They end up inside
+ * quoted PJL strings and, for the user name, in temp file paths. Control
+ * characters and quotes would end the PJL string and start a new PJL
+ * command; a slash would put the temp file in another directory. Replace
+ * them with '_'.
+ */
+static void copyJobField(char *dst, size_t size, const char *src, bool pathSafe)
+{
+    size_t i = 0;
+    for (; src && src[i] && i + 1 < size; i++) {
+        unsigned char c = (unsigned char) src[i];
+        bool bad = c < 0x20 || c == 0x7f || c == '"' || c == '\\' || (pathSafe && c == '/');
+        dst[i] = bad ? '_' : (char) c;
+    }
+    dst[i] = '\0';
+}
 
 
 #ifndef UNITTESTING 
@@ -439,6 +461,20 @@ DRIVER_ERROR HPCupsFilter::startPage (cups_page_header2_t *cups_header)
                 strncpy(m_JA.media_attributes.PageSizeName, cups_header->cupsPageSizeName, sizeof(m_JA.media_attributes.PageSizeName));
             }
         }   
+
+        // Rows are read from a buffer sized from cupsWidth, and the
+        // printable area must sit inside the page.
+        if ((long long) m_JA.media_attributes.physical_width * horz_res / 72 > MAX_RASTER_WIDTH ||
+            (long long) m_JA.media_attributes.physical_height * vert_res / 72 > MAX_RASTER_WIDTH ||
+            m_JA.media_attributes.printable_width > cups_header->cupsWidth + 8 ||
+            m_JA.media_attributes.printable_width + m_JA.media_attributes.printable_start_x >
+                m_JA.media_attributes.physical_width * horz_res / 72 ||
+            m_JA.media_attributes.printable_height > MAX_RASTER_WIDTH) {
+            dbglog("DEBUG: printable area does not fit the page\n");
+            ppdClose(m_ppd);
+            m_ppd = NULL;
+            return SYSTEM_ERROR;
+        }
     }
     else {
         m_JA.media_attributes.physical_width   = (cups_header->PageSize[0] * horz_res) / 72;
@@ -455,8 +491,8 @@ DRIVER_ERROR HPCupsFilter::startPage (cups_page_header2_t *cups_header)
 
     struct utsname  uts_name;
     uname(&uts_name);
-    strncpy(m_JA.job_title, m_argv[3], sizeof(m_JA.job_title)-1);
-    strncpy(m_JA.user_name, m_argv[2], sizeof(m_JA.user_name)-1);
+    copyJobField(m_JA.job_title, sizeof(m_JA.job_title), m_argv[3], false);
+    copyJobField(m_JA.user_name, sizeof(m_JA.user_name), m_argv[2], true);
     strncpy(m_JA.host_name, uts_name.nodename, sizeof(m_JA.host_name)-1);
     strncpy(m_JA.os_name, uts_name.sysname, sizeof(m_JA.os_name)-1);
     getdomainname(m_JA.domain_name, sizeof(m_JA.domain_name) - 1);
@@ -561,7 +597,7 @@ int HPCupsFilter::StartPrintJob(int  argc, char *argv[])
 
     m_iLogLevel = getHPLogLevel();
     m_JA.job_id = atoi(argv[1]);
-    strncpy(m_JA.user_name,argv[2],sizeof(m_JA.user_name)-1);
+    copyJobField(m_JA.user_name, sizeof(m_JA.user_name), argv[2], true);
 
     m_ppd = ppdOpenFile(getenv("PPD"));
     if (m_ppd == NULL) {
@@ -658,6 +694,74 @@ bool HPCupsFilter::isBlankRaster(BYTE *input_raster, cups_page_header2_t *header
 }
 
 
+/*
+ *  Reject page headers the filter cannot handle. The page buffer and the
+ *  pipeline are sized from the first page, so later pages must match it.
+ *  The colour space is read through memcpy because the field is an enum and
+ *  a bad value must not be loaded as one.
+ */
+static bool enumAtMost(const void *field, unsigned int max)
+{
+    unsigned int v;
+    memcpy(&v, field, sizeof(v));
+    return v <= max;
+}
+
+static bool headerIsSane(const cups_page_header2_t *h, const cups_page_header2_t *first)
+{
+    unsigned int cs;
+    memcpy(&cs, &h->cupsColorSpace, sizeof(cs));
+    if (cs != CUPS_CSPACE_K && cs != CUPS_CSPACE_RGB && cs != CUPS_CSPACE_RGBW) {
+        return false;
+    }
+    // Other enum fields, bools are 0 or 1 and the rest stay below 4.
+    if (!enumAtMost(&h->Collate, 1) || !enumAtMost(&h->Duplex, 1) ||
+        !enumAtMost(&h->InsertSheet, 1) || !enumAtMost(&h->ManualFeed, 1) ||
+        !enumAtMost(&h->MirrorPrint, 1) || !enumAtMost(&h->NegativePrint, 1) ||
+        !enumAtMost(&h->OutputFaceUp, 1) || !enumAtMost(&h->Separations, 1) ||
+        !enumAtMost(&h->Tumble, 1) || !enumAtMost(&h->AdvanceMedia, 3) ||
+        !enumAtMost(&h->CutMedia, 3) || !enumAtMost(&h->Jog, 3) ||
+        !enumAtMost(&h->LeadingEdge, 3) || !enumAtMost(&h->Orientation, 3) ||
+        !enumAtMost(&h->cupsColorOrder, 2)) {
+        return false;
+    }
+    if (h->cupsWidth == 0 || h->cupsWidth > MAX_RASTER_WIDTH) {
+        return false;
+    }
+    // These are scaled by the resolution and stored in ints.
+    for (int i = 0; i < 2; i++) {
+        if (h->HWResolution[i] == 0 || h->HWResolution[i] > 9600 ||
+            h->PageSize[i] > 65535 || h->Margins[i] > 65535 ||
+            !(fabsf(h->cupsReal[i]) <= 1000.0f)) {
+            return false;
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        if (h->ImagingBoundingBox[i] > 65535) {
+            return false;
+        }
+    }
+    if (h->cupsBitsPerColor == 0 || h->cupsBitsPerColor > 8 ||
+        h->cupsBitsPerPixel == 0 || h->cupsBitsPerPixel > 32) {
+        return false;
+    }
+    // The page buffer holds cupsWidth * 4 + 32 bytes.
+    if (h->cupsBytesPerLine == 0 ||
+        h->cupsBytesPerLine > (unsigned long long) h->cupsWidth * 4 ||
+        h->cupsBytesPerLine != ((unsigned long long) h->cupsWidth * h->cupsBitsPerPixel + 7) / 8) {
+        return false;
+    }
+    if (first != NULL) {
+        if (memcmp(&h->cupsColorSpace, &first->cupsColorSpace, sizeof(cs)) != 0 ||
+            h->cupsWidth != first->cupsWidth ||
+            h->cupsBytesPerLine != first->cupsBytesPerLine ||
+            h->cupsBitsPerPixel != first->cupsBitsPerPixel) {
+            return false;
+        }
+    }
+    return true;
+}
+
 int HPCupsFilter::processRasterData(cups_raster_t *cups_raster)
 {
     FILE                   *kfp = NULL;
@@ -666,13 +770,16 @@ int HPCupsFilter::processRasterData(cups_raster_t *cups_raster)
     BYTE                   *rgbRaster = NULL;
     int                    current_page_number = 0;
     cups_page_header2_t    cups_header;
+    cups_page_header2_t    first_header;
     DRIVER_ERROR           err;
     int                    ret_status = 0;
+
+    memset(&first_header, 0, sizeof(first_header));
 
     char hpPreProcessedRasterFile[MAX_FILE_PATH_LEN]; //temp file needed to store raster data with swaped pages.
 
 
-    sprintf(hpPreProcessedRasterFile, "%s/hp_%s_cups_SwapedPagesXXXXXX",CUPS_TMP_DIR, m_JA.user_name);
+    snprintf(hpPreProcessedRasterFile, sizeof(hpPreProcessedRasterFile), "%s/hp_%s_cups_SwapedPagesXXXXXX",CUPS_TMP_DIR, m_JA.user_name);
     #ifndef DISABLE_IMAGEPROCESSOR 
 	    image_processor_t* imageProcessor=NULL;
 	    IMAGE_PROCESSOR_ERROR result;
@@ -693,9 +800,21 @@ int HPCupsFilter::processRasterData(cups_raster_t *cups_raster)
 		    }
 		    }
        #endif
+        if (!headerIsSane(&cups_header, current_page_number > 0 ? &first_header : NULL)) {
+            dbglog("DEBUG: unsupported raster page header, job canceled\n");
+            if (current_page_number > 0) {
+                cups_header = first_header;
+            }
+            else {
+                cups_header.cupsColorSpace = CUPS_CSPACE_W;
+            }
+            ret_status = JOB_CANCELED;
+            break;
+        }
         current_page_number++;
 
         if (current_page_number == 1) {
+            first_header = cups_header;
 
             if (startPage(&cups_header) != NO_ERROR) {
                 return JOB_CANCELED;
@@ -787,7 +906,12 @@ int HPCupsFilter::processRasterData(cups_raster_t *cups_raster)
         // Iterating through the raster per page
         bool is_ljmono = strcmp(m_JA.printer_language, "ljmono");
         for (int y = 0; y < (int) cups_header.cupsHeight; y++) {
-            cupsRasterReadPixels (cups_raster, m_pPrinterBuffer, cups_header.cupsBytesPerLine);
+            if (cupsRasterReadPixels (cups_raster, m_pPrinterBuffer, cups_header.cupsBytesPerLine) == 0) {
+                dbglog("DEBUG: raster data ended early, job canceled\n");
+                ret_status = JOB_CANCELED;
+                err = IO_ERROR;
+                break;
+            }
             color_raster = rgbRaster;
             black_raster = kRaster;
             #ifndef DISABLE_IMAGEPROCESSOR 
