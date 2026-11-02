@@ -9,6 +9,11 @@
 #     macOS cupsfilter, run it through build/hpcups with one representative
 #     PPD, and check the output for that language's header bytes.
 #  3. Two page job on the DeskJet 2300 (PCL3GUI2).
+#  Set HPCUPS to test another filter binary (make asan does).
+#  The filter output for the fixed test page is hashed per language and
+#  compared with tests/golden/outputs.sha256. Job times, host and date are
+#  masked first. Run with UPDATE_GOLDEN=1 to rewrite the file after a
+#  change that is meant to alter the output.
 #  The ZjStream and ZxStream languages also get their JBIG data checked: the
 #  built-in encoder is round tripped through jbigkit's decoder
 #  (tests/jbigrt.c), and the JBIG image in each filter output is cut out and
@@ -17,9 +22,12 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-filter="$root/build/hpcups"
+filter=$(cd "$(dirname "${HPCUPS:-$root/build/hpcups}")" && pwd)/$(basename "${HPCUPS:-$root/build/hpcups}")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+
+golden="$root/tests/golden/outputs.sha256"
+mkdir "$tmp/golden"
 
 [ -x "$filter" ] || { echo "missing $filter, run make first" >&2; exit 1; }
 
@@ -74,7 +82,7 @@ run_filter() {
     [ -s "$tmp/page.ras" ] || { echo "FAIL: empty raster" >&2; exit 1; }
 
     # argv: job user title copies options
-    PPD="$ppd" TMPDIR="$tmp" "$filter" 1 "$USER" "local test" 1 "" \
+    PPD="$ppd" TMPDIR="$tmp" "$filter" 1 smudge "local test" 1 "" \
         < "$tmp/page.ras" > "$tmp/out.bin" 2> "$tmp/hpcups.log" \
         || { cat "$tmp/hpcups.log" >&2; echo "FAIL: hpcups exit status" >&2; exit 1; }
 }
@@ -129,12 +137,14 @@ check_jbig() {
         || { echo "FAIL: $lang: cannot read the JBIG stream" >&2; exit 1; }
     [ "$(wc -l < "$tmp/jbig/$lang.txt" | tr -d ' ')" -eq 1 ] \
         || { echo "FAIL: $lang: expected one JBIG image for one page" >&2; exit 1; }
-    set -- $(cat "$tmp/jbig/$lang.txt")
+    read -r -a fields < "$tmp/jbig/$lang.txt"
+    set -- "${fields[@]}"
     want_x=$2
     want_y=$3
     "$tmp/jbig/jbigdec" "$tmp/jbig/$lang-1.jbg" "$tmp/jbig/$lang-1.raw" > "$tmp/jbig/$lang-dec.txt" \
         || { echo "FAIL: $lang: jbigkit cannot decode the page image" >&2; exit 1; }
-    set -- $(cat "$tmp/jbig/$lang-dec.txt")
+    read -r -a fields < "$tmp/jbig/$lang-dec.txt"
+    set -- "${fields[@]}"
     [ "$#" -eq 3 ] || { echo "FAIL: $lang: jbigdec printed no size" >&2; exit 1; }
     if [ "$kind" = zjs ]; then
         [ "$1" = "$want_x" ] && [ "$2" = "$want_y" ] \
@@ -165,6 +175,49 @@ sys.exit(0 if a == b else 1)' "$tmp/jbig/$lang-1.jbg" "$tmp/jbig/$lang-ref-1.jbg
             || { echo "FAIL: $lang: JBIG stream differs from $(basename "$tool")" >&2; exit 1; }
         echo "PASS: $lang JBIG stream is byte for byte what $(basename "$tool") writes"
     fi
+}
+
+# Golden output check. tests/golden/outputs.sha256 has one line per language:
+# the language, the SHA-256 of the raster cupsfilter made and the SHA-256 of
+# the masked filter output. A different raster means the macOS renderer
+# changed, so the output hash says nothing and the check is skipped.
+golden_mask() {
+    python3 -I -c '
+import re, sys
+d = open(sys.argv[1], "rb").read()
+for pat, rep in (
+    (rb"Job Start Time: [^\"]*", b"Job Start Time: T"),
+    (rb"job-start-time: [^\r\n]*", b"job-start-time: T"),
+    (rb"JobAcct2=[^\"\r\n]*", b"JobAcct2=H"),
+    (rb"JobAcct4=[0-9]+", b"JobAcct4=N"),
+    (rb"TIMESTAMP=[0-9]+", b"TIMESTAMP=N"),
+    (rb"(App Filename: [^;]*; )[0-9]+-[0-9]+-[0-9]+", rb"\1D"),
+):
+    d = re.sub(pat, rep, d)
+open(sys.argv[2], "wb").write(d)' "$1" "$2"
+}
+
+golden_check() {
+    lang=$1
+    name=$2
+    # PCLm is a PDF whose xref offsets move with the length of the job start time.
+    [ "$lang" = hbpl1 ] && return 0
+    golden_mask "$tmp/out.bin" "$tmp/golden/out.norm"
+    ras_sum=$(shasum -a 256 < "$tmp/page.ras" | cut -d' ' -f1)
+    out_sum=$(shasum -a 256 < "$tmp/golden/out.norm" | cut -d' ' -f1)
+    if [ -n "${UPDATE_GOLDEN:-}" ]; then
+        echo "$lang $ras_sum $out_sum" >> "$tmp/golden/new"
+        return 0
+    fi
+    want=$(awk -v l="$lang" '$1 == l { print $2, $3 }' "$golden")
+    [ -n "$want" ] \
+        || { echo "FAIL: golden: no hash for $lang, run UPDATE_GOLDEN=1 scripts/test-local.sh" >&2; exit 1; }
+    if [ "${want% *}" != "$ras_sum" ]; then
+        echo "SKIP: golden: $lang ($name): cupsfilter made a different raster than the recorded one"
+        return 0
+    fi
+    [ "${want#* }" = "$out_sum" ] \
+        || { echo "FAIL: golden: $lang ($name): filter output changed (got $out_sum, want ${want#* }); if intended run UPDATE_GOLDEN=1 scripts/test-local.sh" >&2; exit 1; }
 }
 
 printf 'Smudge local test page\nThe quick brown fox jumps over the lazy dog.\n' > "$tmp/page.txt"
@@ -217,9 +270,24 @@ for row in $reps; do
     ljmono|ljcolor|ljfastraster|pcl3gui2|pcl3gui|pcl3)
         has "$UEL" || { echo "FAIL: $lang ($name): no UEL at end of job" >&2; exit 1; } ;;
     esac
+    golden_check "$lang" "$name"
     echo "PASS: $lang ($name) produced $size bytes"
     [ "$lang" = pcl3gui2 ] && pcl3gui2_ppd=$ppd
 done
+
+if [ -n "${UPDATE_GOLDEN:-}" ]; then
+    {
+        echo "# SPDX-License-Identifier: AGPL-3.0-or-later"
+        echo "# Copyright (C) 2026 Gamunu Balagalla"
+        echo "#"
+        echo "# language, SHA-256 of the test page raster, SHA-256 of the masked filter output."
+        echo "# Written by UPDATE_GOLDEN=1 scripts/test-local.sh. hbpl1 is not listed."
+        sort "$tmp/golden/new"
+    } > "$golden"
+    echo "PASS: golden hashes written to tests/golden/outputs.sha256"
+else
+    echo "PASS: filter output matches the golden hashes"
+fi
 
 # ---- 3. two pages on the DeskJet 2300 ----
 i=1
