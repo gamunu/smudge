@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Gamunu Balagalla
+
+name: fuzz
+
+# The short fuzz run in ci.yml checks each push. This is the long run: half an
+# hour a week, plus a manual trigger for when a parser change needs more time.
+
+on:
+  schedule:
+    - cron: "23 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      - name: Install LLVM, jpeg-turbo and pkgconf
+        run: brew install llvm jpeg-turbo pkgconf
+
+      - name: Fuzz the raster filter
+        run: make fuzz FUZZ_TIME=1800
+
+      - name: Upload crash inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crashes
+          path: build/fuzz/crash-*
+          if-no-files-found: ignore

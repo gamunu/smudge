@@ -7,7 +7,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/gamunu/smudge/main/install.sh | sh
 #
 # Downloads the newest .pkg from GitHub Releases, checks it against the
-# release's SHA256SUMS, and installs it with Apple's installer command.
+# release's SHA256SUMS, verifies its build provenance when gh is installed,
+# and installs it with Apple's installer command.
 # Set HPCUPS_VERSION=0.1.0 to install a specific version.
 
 set -eu
@@ -43,6 +44,13 @@ expected=$(awk -v f="$pkg" '$2 == f || $2 == "*" f { print $1 }' "$tmp/SHA256SUM
 [ -n "$expected" ] || die "$pkg is not listed in SHA256SUMS"
 actual=$(shasum -a 256 "$tmp/$pkg" | awk '{ print $1 }')
 [ "$expected" = "$actual" ] || die "checksum mismatch for $pkg"
+
+if command -v gh >/dev/null 2>&1; then
+    say "Verifying build provenance"
+    gh attestation verify "$tmp/$pkg" --repo "$REPO" >/dev/null || die "build provenance check failed for $pkg"
+else
+    say "Build provenance not checked (gh is not installed). To check it, install gh and run: gh attestation verify $pkg --repo $REPO"
+fi
 
 say "Installing (macOS will ask for your password)"
 sudo installer -pkg "$tmp/$pkg" -target / || die "installer failed"

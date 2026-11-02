@@ -1,0 +1,4 @@
+# Minimum line coverage per Swift module, checked by scripts/coverage.sh.
+SmudgeScan 90
+SmudgeKit 75
+SmudgeCore 30
