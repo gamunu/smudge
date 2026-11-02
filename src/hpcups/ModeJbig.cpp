@@ -326,7 +326,7 @@ void ModeJbig::compress (int plane_number)
     myBuffer.dwTotalSize = 0;
     BYTE    *p = m_pszInputRasterData + (m_iWidth * m_iBPP * m_iLastRaster * plane_number);
 
-    memset (myBuffer.pszCompressedData, 0, m_iWidth * m_iLastRaster * m_iBPP);
+    memset (myBuffer.pszCompressedData, 0, (size_t)m_iWidth * m_iLastRaster * m_iBPP);
     hp_encode_bits_to_jbig (m_iWidth * 8 * m_iBPP, m_iLastRaster, &p, &myBuffer, &se);
 
     compressedsize = myBuffer.dwTotalSize;

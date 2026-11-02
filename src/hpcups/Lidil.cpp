@@ -333,7 +333,7 @@ DRIVER_ERROR Lidil::FormFeed()
     for (i = 0; i < (int) m_pPM->dyeCount; i++)
     {
         for (j = 0; j < n; j++)
-            memset (m_SwathData[i][m_iNextRaster+j], 0, m_iImageWidth * m_iBitDepth);
+            memset (m_SwathData[i][m_iNextRaster+j], 0, (size_t) m_iImageWidth * m_iBitDepth);
     }
     m_iNextRaster += n;
     n = m_sSwathHeight / (4 * m_iBitDepth);
@@ -350,7 +350,7 @@ DRIVER_ERROR Lidil::FormFeed()
         for (i = 0; i < (int) m_pPM->dyeCount; i++)
         {
             for (j = 0; j < n; j++)
-                memset (m_SwathData[i][m_iNextRaster+j], 0, m_iImageWidth * m_iBitDepth);
+                memset (m_SwathData[i][m_iNextRaster+j], 0, (size_t) m_iImageWidth * m_iBitDepth);
         }
         m_iNextRaster += n;
     }
@@ -936,7 +936,7 @@ DRIVER_ERROR Lidil::allocateSwathBuffers()
     memset (m_szCompressBuf, 0, iCompressBufSize);
 
     BYTE    *p = NULL;
-    int     iSwathBuffSize;
+    size_t  iSwathBuffSize;
 
     m_sSwathHeight = SWATH_HEIGHT;
 
@@ -970,8 +970,8 @@ DRIVER_ERROR Lidil::allocateSwathBuffers()
     }
 
     iSwathBuffSize = m_pPM->dyeCount * sizeof (BYTE *) +
-                     m_pPM->dyeCount * m_sSwathHeight * sizeof (BYTE *) +
-                     size * m_pPM->dyeCount * m_sSwathHeight;
+                     (size_t) m_pPM->dyeCount * m_sSwathHeight * sizeof (BYTE *) +
+                     (size_t) size * m_pPM->dyeCount * m_sSwathHeight;
     if ((p = new BYTE[iSwathBuffSize]) == NULL)
     {
         return ALLOCMEM_ERROR;
@@ -980,13 +980,13 @@ DRIVER_ERROR Lidil::allocateSwathBuffers()
     int     i;
     m_SwathData = (BYTE ***) p;
     for (i = 0; i < (int) m_pPM->dyeCount; i++)
-        m_SwathData[i] = (BYTE **) (p + sizeof (BYTE *) * m_pPM->dyeCount + i * m_sSwathHeight * sizeof (BYTE *));
+        m_SwathData[i] = (BYTE **) (p + sizeof (BYTE *) * m_pPM->dyeCount + (size_t) i * m_sSwathHeight * sizeof (BYTE *));
 
     for (i = 0; i < (int) m_pPM->dyeCount; i++)
     {
         p = (BYTE *) m_SwathData + sizeof (BYTE *) * m_pPM->dyeCount +
-                m_pPM->dyeCount * m_sSwathHeight * sizeof (BYTE *) +
-                size * m_sSwathHeight * i;
+                (size_t) m_pPM->dyeCount * m_sSwathHeight * sizeof (BYTE *) +
+                (size_t) size * m_sSwathHeight * i;
         for (int j = 0; j < m_sSwathHeight; j++)
         {
             memset (p, 0, size);

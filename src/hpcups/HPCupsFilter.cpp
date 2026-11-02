@@ -44,6 +44,7 @@
 #include "hplip_utils.h"
 
 #define MAX_RASTER_WIDTH 131072
+#define MAX_RASTER_HEIGHT 240000   // 1200 dpi * 200 inches
 
 #define HP_FILE_VERSION_STR    "03.09.08.0"
 
@@ -572,7 +573,7 @@ int HPCupsFilter::StartPrintJob(int  argc, char *argv[])
     t = localtime(&long_time);
     gettimeofday(&tv, NULL);
     strncpy(m_JA.job_start_time, asctime(t), sizeof(m_JA.job_start_time)-1);    // returns Fri Jun  5 08:12:16 2009
-    snprintf(m_JA.job_start_time+19, sizeof(m_JA.job_start_time) - 20, ":%ld %d", tv.tv_usec/1000, t->tm_year + 1900); // add milliseconds
+    snprintf(m_JA.job_start_time+19, sizeof(m_JA.job_start_time) - 20, ":%ld %d", (long) (tv.tv_usec/1000), t->tm_year + 1900); // add milliseconds
 
 #ifdef UNITTESTING
     memset(m_JA.job_start_time,0,sizeof(m_JA.job_start_time));
@@ -725,7 +726,8 @@ static bool headerIsSane(const cups_page_header2_t *h, const cups_page_header2_t
         !enumAtMost(&h->cupsColorOrder, 2)) {
         return false;
     }
-    if (h->cupsWidth == 0 || h->cupsWidth > MAX_RASTER_WIDTH) {
+    if (h->cupsWidth == 0 || h->cupsWidth > MAX_RASTER_WIDTH ||
+        h->cupsHeight > MAX_RASTER_HEIGHT) {
         return false;
     }
     // These are scaled by the resolution and stored in ints.

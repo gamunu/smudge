@@ -1611,7 +1611,7 @@ void ErnieFilter::writeBufferedRows()
 
 void ErnieFilter::submitRowToFilter(unsigned char *rowPtr)
 {
-    memcpy(m_row_ptrs[m_buffered_row_count], rowPtr, m_row_width_in_pixels*m_input_bytes_per_pixel);
+    memcpy(m_row_ptrs[m_buffered_row_count], rowPtr, (size_t)m_row_width_in_pixels*m_input_bytes_per_pixel);
 
     int pixelIndex = 0;
     uint32_t *RowPtrDest = m_row_bufs[m_buffered_row_count];
