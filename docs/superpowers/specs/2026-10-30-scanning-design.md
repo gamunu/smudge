@@ -157,6 +157,16 @@ page on the glass:
   returned to Idle. The printer handles the overlap itself.
 - **launchd.** `--probe-bonjour` run from a LaunchAgent registered
   `_uscan._tcp` local-only, and `dns-sd -lo -B` listed it.
+- **Through ImageCaptureCore** (`smudge-scand --serve`, then
+  `scan-probe`, color JPEG, full glass): 75 dpi in 13 s, 300 dpi in
+  26 s, 600 dpi in 78 s and 1200 dpi in 280 s (10200 x 14032, 4.5 MB).
+  Each scan used one streamed `NextDocument` with no retries, and the
+  scanner returned to Idle. Long streamed replies are not cut off at
+  60 s by Image Capture when the bytes come from the printer. The
+  demo scanner, which writes its JPEG in one-second pieces, did see
+  Image Capture give up at 60 s, so demo runs do not stand in for the
+  printer on this point. At 75 dpi ImageCaptureCore saved the 637 x 877
+  page resampled to 2550 x 3508 at 72 dpi.
 
 ## Goals
 
@@ -265,8 +275,8 @@ printer
 - `GET /eSCL/ScanJobs/<id>/NextDocument`: the page in the requested
   format, then 404 once the job's page has been sent. The platen
   gives one page per job. Image Capture gives up on a response that
-  sends no bytes for about a minute, and a 1200 dpi scan takes 4.5
-  minutes, so the reply depends on the job. When the printer's JPEG is
+  cannot wait for a 4.5 minute 1200 dpi scan to finish before the
+  reply starts, so the reply depends on the job. When the printer's JPEG is
   the final file (JPEG requested, no post-processing), the reply is
   `200 image/jpeg` with chunked encoding at once, and the agent sends
   the page file's bytes as the printer writes them, polling every
