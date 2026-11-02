@@ -117,6 +117,7 @@ final class Agent {
         do {
             e.service = try ScannerService(
                 serial: serial, device: device, name: name, workDir: scanWorkDir(),
+                log: { line in if !line.contains("/ScannerStatus") && !line.contains("/ScannerCapabilities") { log(line) } },
                 onActivity: { scanning in store.set(scanning ? .scanning : nil, serial: serial, writer: .scand) },
                 blocked: { store.current(serial: serial, from: .app) == .maintenance })
             log("serving \(name) on 127.0.0.1:\(e.service!.port)")
